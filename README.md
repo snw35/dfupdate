@@ -54,11 +54,13 @@ Create a `dfupdate.conf` file in the same directory as your `Dockerfile` with th
 # Alpine Linux
 baseImageRegex = '\d+\.\d+\.?\d?'
 ```
-Set the `baseImageRegex` value to a regular expression that will match the base images you want. This is required to filter out e.g beta and release candidate versions, as Python's version parser will often select these otherwise. The example given is suitable for alpine. 
+Set the `baseImageRegex` value to a regular expression that will match the base images you want. This is required to filter out e.g beta and release candidate versions, as Python's version parser will often select these otherwise. The example given is suitable for alpine.
 
 ### The new_ver.txt file
 
-This file is the output from
+This file is the output from [nvchecker](https://github.com/lilydjwg/nvchecker), run from [snw35/nvchecker](https://github.com/snw35/nvchecker).
+
+Nvchecker is used to retrieve the latest versions of packaged software, and must be configured for your repo before going ahead.
 
 ## How To Use
 

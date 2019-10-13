@@ -35,9 +35,9 @@ def get_remote_sha(url):
 
 # Set variables
 updated = False
-configFileName = "dfupdate.conf"
-versionFileName = "new_ver.txt"
-dockerFileName = "Dockerfile"
+configFileName = os.getcwd() + "/dfupdate.conf"
+versionFileName = os.getcwd() + "/new_ver.txt"
+dockerFileName = os.getcwd() + "/Dockerfile"
 
 try:
     with open(versionFileName, 'r'):

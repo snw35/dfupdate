@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# DFUPDATE_VERSION 0.0.1
+
 import argparse
 import configparser
 from pkg_resources import parse_version

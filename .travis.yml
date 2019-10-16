@@ -1,17 +1,27 @@
 services: docker
 language: bash
-
-# Only build tags
-if: tag IS present
-
 install:
   - git clone https://github.com/docker-library/official-images.git ~/official-images
 
 before_script:
   - env | sort
-  - IMAGE="${TRAVIS_REPO_SLUG}:${TRAVIS_TAG}"
+  - docker run -it --rm --name nvchecker --mount type=bind,source=${PWD},target=/data/ -w /data snw35/nvchecker:latest nvchecker nvchecker.ini
+  - docker run -it --rm --name dfupdate --mount type=bind,source=${PWD},target=/data/ -w /data snw35/dfupdate:latest
+  - if [[ $(git status --porcelain | wc -l) -eq 0 ]]; then
+      echo "No local changes detected, nothing to build, exiting.";
+      travis_terminate 0;
+    else
+      echo "Local changes detected, continuing...";
+      cp new_ver.txt old_ver.txt;
+    fi
 
 script:
+  - DFUPDATE_VERSION=`grep "# DFUPDATE_VERSION" dfupdate.py | cut -d " " -f 3`
+  - REQUESTS_VERSION=`grep "ENV REQUESTS_VERSION" Dockerfile | cut -d " " -f 3`
+  - DOCKERFILE_PARSE_VERSION=`grep "ENV DOCKERFILE_PARSE_VERSION" Dockerfile | cut -d " " -f 3`
+  - BASE_VERSION=`grep "FROM" Dockerfile | cut -d " " -f 2 | cut -d ":" -f 2`
+  - IMAGE="${TRAVIS_REPO_SLUG}:${DFUPDATE_VERSION}"
+  - env | sort
   - travis_retry docker build -t "$IMAGE" .
   - ~/official-images/test/run.sh "$IMAGE" || travis_terminate 1;
   - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
@@ -21,3 +31,36 @@ script:
 
 after_script:
   - docker images
+
+before_deploy:
+  - git config --local user.name "${DOCKER_USERNAME}"
+  - git config --local user.email "snw35@use.startmail.com"
+  - git remote add upstream https://${GH_TOKEN}@github.com/${TRAVIS_REPO_SLUG}.git > /dev/null 2>&1
+  - git checkout master
+  - git add -A
+  - git commit --message "Software Updated"
+  - TRAVIS_TAG=${DFUPDATE_VERSION}-${REQUESTS_VERSION}-${DOCKERFILE_PARSE_VERSION}-${BASE_VERSION}
+  - git tag $TRAVIS_TAG
+  - git push --quiet --set-upstream upstream
+  - git push --tags --quiet --set-upstream upstream
+
+deploy:
+  provider: releases
+  api_key: $GH_TOKEN
+  skip_cleanup: true
+  body: >
+    base image version: $BASE_VERSION
+    dfupdate version: $DFUPDATE_VERSION
+    requests version: $REQUESTS_VERSION
+    dockerfile parse version: $DOCKERFILE_PARSE_VERSION
+    image deployed: $IMAGE
+
+branches:
+  except:
+    - /^untagged/
+
+env:
+  global:
+  - secure: rFqrAMRHioqK+tZkESnWxfUfZHvusSFwzxA79d8I7rMMkFs8oK0HPjeheyUwAchyQ81o8sBC0we00GEAxEx1iFGNBcxPQhXIU5oM+fBmp0ayWzsmqKa3sge+0VWjp5vmoGJhI5vXhI5HO16bP1ppyl5HeQaXQnwdC/rtxIueni2VfOnMAZXLZrKPyofvzbsV8ttvhGqZL8fPh+RDPk3L04LkD91yG/XCOY9X+CUQmWqYXARq9iDE/NrQdyiQEJL3663Kp4XyHhNXeDvWJLA0HKbEPdPStPF8JzjQd9gVXQAt4+S10e/P1mMb+RTovyA8fO+p4L//G8jNkSV3BFBQnUGZt7ztk6jqzpU0M7F1B+RqrRcZy+5RgiwNIFlj9E4GTwxKpyXWv8LZ4q4QX8nwBAvAgriQ8y9Z4AFV8/nAk39VbyLfRfRNVfdbzNgmqXr6s1f+BsUybuW35amNekVvfkMWExp4ll3X73DdJWyl7Yr6U7oJPnsn/HKjpb7wCm2EW/kKsRhyNz9YcQ3GLo4yl7c/d+EWD66NKt5T8qDulynL+4lSskPGSXgT+XB8NYasznrGWPJEDUdkplpbh211Wq/z6naUxtJKqTZLFittMkwu1zLbVVaXOWjr2F/Ys9VRSUJnVxieRsAq3NSPHC2adFZdo1JMXO6R7bOFYB2H3pk=
+  - secure: ZTHtI5V3kbv63LmmEZOb3WcTAQ57eBQXZ3QC9T0zsfc5Jm70ILnkOtx7JjnyyzebrO18Hynt1au5QGwBoCiNMjinOmxN8LMLe0FE3vBuLmauEx5kow94y4WgY5tGuXH8wxAYx8Y1oZkQfzOAbH5xVYyW/SvzcStVZHZFwYMGOx17nW+RI6XvnXZY5Y2hYrMLpwGX/rNZQJV7U7kZ0ZsLU47bKsnODzXyndVpiE+hBlQ/L40jrtmTsEoc0teqNPH5LQtWpvZcLKgbb94Y21j3ZD7BsudFYzKoYDBbFb+ulGJHsSg+cApYC7TLS8z0xAS9NEXtXuV7NHJfgi6ycGYWK4wtV6chgD3bbENaW03usnFByDL3jYewuKn7fEIUmRrPoOnNNEB2goCeybtOxT5EDEbb7YnyYGJLVrblVm0/v1CwvSm/z8JVkY3X84Qza/BQ4HTM7liBE+yK13MvsyFC2pRG91+jZzcAWNCwd9NQrRLs2T4DLTaDmkBvh/nmFHNViRch++GFUbsW3YFk5HsKNbJD3q0rBzGR98YtiyifT8sStr/znP9qP1mSfDVod+HcnnnpY/Ak0d4eQ+1SHsIS5NLrXKlxPKpIK7tQWAUlTZrKaAZOJOvBrXq8HmpRpb9KXnkFKk1XuYksX5FYYEtTBlHNxBenjQU0HOdx87lVgSE=
+  - secure: QWyxMDhsGZKhTz1omOuF+nNo+M6U2yw1SoutIisN+cmsQXCFYZOdoGiMp2EqMHtI+gMA56Gjy2/pK9d2og1GzKcFv5emATMJEn+YYPv8I9Wus3yK4YRcZdUZ47oJO2mZZaFLlV6Ws5m5OfzP3wVn2gT3JPkvzDZNvWbUOjLR9/0Qe6gZdP1mZ0nCwqagg3SmB6VGxQSnA5FFydLUu0W4zzvCjyMd9s952iWptJqcJLzRaWIwmEYuO9ckNDOFfX38G8o7UNanzY0j6pOSfYB5mug5B5KN67ZDswVqiuTHTaxr/gBQCY2GRA8Rifa5DYNI0Ja/znQHJbRcq/rZaWtfGF7iZrADkO7DS+f/wl3Z6zoG4L9J6BcMoUWfriEIyVMkls8PVma34fA9a0VIq0tP5extaFdhf+hSi1b4UKIhhjpUGEBcDySNzw7gM8Itm03qgvftdp/3RfG6AHKS91ufirMD0TXtZFltDV4OAMpuCLUCYEOrxDmBoZz6ZWQQZCrlGYv4Hs8mxgpnjChMjHe0k3aBZqtzjCW/ZRL0lFfns3bUcrhT7W8DtzvsBLvltYLx9Wp7jxsZ8CBrTE4cv4udWEtj/DVUEZhkpMVHeFVFoga9B6qTWpji/yzo0o6vLZr5My2ndyE+InKiyAtvXH60QkA0t5cB1nxsf4+fBvCd3Vg=

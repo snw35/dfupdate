@@ -1,16 +1,23 @@
 # dfupdate
 
+* [Travis CI: ![Build Status](https://travis-ci.org/snw35/dfupdate.svg?branch=master)](https://travis-ci.org/snw35/dfupdate)
+* [Dockerhub: snw35/dfupdate](https://hub.docker.com/r/snw35/dfupdate)
+
 Dockerfile Automatic Updater.
 
-Python script to automatically update both the base image and included software in a Dockerfile. Must have the `Dockerfile`, a `dfupdate.conf` config file (outlined below), and an `new_ver.txt` file in the current working directory when run.
+Python script to automatically update both the base image and included software in a Dockerfile.
+
+This image, working with [snw35/nvchecker](https://github.com/snw35/nvchecker), automatically updates itself once per week.
+
+## Requirements
+
+Must have `Dockerfile`, `dfupdate.conf` config file (outlined below), and `new_ver.txt` in the current working directory when run.
 
 It will:
  * Use the regex stored in `dfupdate.conf` to search for an updated base image.
  * Use the versions stored in `new_ver.txt` to update the software installed in the Dockerfile.
 
-To make your project compatible:
-
-### Use the ENV variables in your Dockerfile
+### Required ENV Variables
 
 Install software in your Dockerfile with the following ENV vars:
 
@@ -45,13 +52,12 @@ RUN pip3 install --no-cache-dir \
     dockerfile_parse==${DOCKERFILE_PARSE_VERSION} \
 ```
 
-### The dfupdate.conf file
+### dfupdate.conf Config File
 
 Create a `dfupdate.conf` file in the same directory as your `Dockerfile` with the following content:
 ```
 [DEFAULT]
 
-# Alpine Linux
 baseImageRegex = '\d+\.\d+\.?\d?'
 ```
 Set the `baseImageRegex` value to a regular expression that will match the base images you want. This is required to filter out e.g beta and release candidate versions, as Python's version parser will often select these otherwise. The example given is suitable for alpine.
@@ -65,4 +71,4 @@ Nvchecker is used to retrieve the latest versions of packaged software, and must
 ## How To Use
 
 While in the root directory of a compatible project, run the container with the current directory bind-mounted to `/data`:
-`docker run -it --rm --name dfupdate --mount type=bind,source=${PWD},target=/data/ snw35/dfupdate:latest`
+`docker run -it --rm --mount type=bind,source=${PWD},target=/data/ -w /data snw35/dfupdate:latest`

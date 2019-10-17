@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# DFUPDATE_VERSION 0.0.2
+# DFUPDATE_VERSION 0.0.3
 
 import argparse
 import configparser

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# DFUPDATE_VERSION 0.0.1
+# DFUPDATE_VERSION 0.0.2
 
 import argparse
 import configparser
@@ -93,7 +93,7 @@ try:
             firstPart = env.rsplit('_', 1)[0]
             lastWord = env.split('_')[-1]
 
-            if (lastWord == "VERSION"):
+            if (lastWord == "VERSION") and (dfp.envs[env]):
                 print("Found a version number for " + firstPart + " " + dfp.envs[env])
                 softwareList.append(firstPart)
                 versionDict[firstPart] = dfp.envs[env]

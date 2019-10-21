@@ -1,10 +1,8 @@
 services: docker
 language: bash
 install:
-  - git clone https://github.com/docker-library/official-images.git ~/official-images
-
-before_script:
   - env | sort
+  - git clone https://github.com/docker-library/official-images.git ~/official-images
   - docker run -it --rm --name nvchecker --mount type=bind,source=${PWD},target=/data/ -w /data -e NVCHECKER_GITHUB_TOKEN=${GH_TOKEN} snw35/nvchecker:latest nvchecker nvchecker.ini
   - docker run -it --rm --name dfupdate --mount type=bind,source=${PWD},target=/data/ -w /data snw35/dfupdate:latest
   - if [[ $(git status --porcelain | wc -l) -eq 0 ]] && [[ -z ${TRAVIS_TAG} ]]; then
@@ -12,15 +10,24 @@ before_script:
       travis_terminate 0;
     else
       echo "Local changes or tagged commit detected, continuing...";
-      cp new_ver.txt old_ver.txt;
     fi
 
-script:
+before_script:
   - DFUPDATE_VERSION=`grep "# DFUPDATE_VERSION" dfupdate.py | cut -d " " -f 3`
   - REQUESTS_VERSION=`grep "ENV REQUESTS_VERSION" Dockerfile | cut -d " " -f 3`
   - DOCKERFILE_PARSE_VERSION=`grep "ENV DOCKERFILE_PARSE_VERSION" Dockerfile | cut -d " " -f 3`
   - BASE_VERSION=`grep "FROM" Dockerfile | cut -d " " -f 2 | cut -d ":" -f 2`
   - IMAGE="${TRAVIS_REPO_SLUG}:${DFUPDATE_VERSION}"
+  - PROPOSED_TAG=${DFUPDATE_VERSION}-${REQUESTS_VERSION}-${DOCKERFILE_PARSE_VERSION}-${BASE_VERSION}
+  - git config --local user.name "${DOCKER_USERNAME}"
+  - git config --local user.email "snw35@use.startmail.com"
+  - git remote add upstream https://${GH_TOKEN}@github.com/${TRAVIS_REPO_SLUG}.git > /dev/null 2>&1
+  - if [ "`git ls-remote --exit-code --tags upstream ${PROPOSED_TAG}`" ]; then
+      echo "Proposed tag already exists on remote, skipping container build.";
+      travis_terminate 0;
+  - fi
+
+script:
   - env | sort
   - travis_retry docker build -t "$IMAGE" .
   - ~/official-images/test/run.sh "$IMAGE" || travis_terminate 1;
@@ -33,14 +40,11 @@ after_script:
   - docker images
 
 before_deploy:
-  - git config --local user.name "${DOCKER_USERNAME}"
-  - git config --local user.email "snw35@use.startmail.com"
-  - git remote add upstream https://${GH_TOKEN}@github.com/${TRAVIS_REPO_SLUG}.git > /dev/null 2>&1
+  - cp new_ver.txt old_ver.txt
   - git checkout master
   - git add -A
   - git commit --message "Software Updated"
-  - TRAVIS_TAG=${DFUPDATE_VERSION}-${REQUESTS_VERSION}-${DOCKERFILE_PARSE_VERSION}-${BASE_VERSION}
-  - git tag $TRAVIS_TAG
+  - git tag $PROPOSED_TAG
   - git push --quiet --set-upstream upstream
   - git push --tags --quiet --set-upstream upstream
 

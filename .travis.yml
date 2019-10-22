@@ -27,7 +27,7 @@ before_script:
     else
       echo "Proposed tag already exists on remote, skipping container build.";
       travis_terminate 0;
-  - fi
+    fi
 
 script:
   - env | sort

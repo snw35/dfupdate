@@ -16,7 +16,8 @@ RUN apk --upgrade --no-cache add \
     dockerfile_parse==${DOCKERFILE_PARSE_VERSION} \
   && apk del build.deps \
   && chmod +x /dfupdate.py \
-  && chmod +x /docker-entrypoint.sh
+  && chmod +x /docker-entrypoint.sh \
+  && python3 /dfupdate.py
 
 WORKDIR /data
 

@@ -7,7 +7,7 @@ Dockerfile Automatic Updater.
 
 Python script to automatically update both the base image and included software in a Dockerfile.
 
-This image, working with [snw35/nvchecker](https://github.com/snw35/nvchecker), automatically updates itself once per week.
+This image, working with [snw35/nvchecker](https://github.com/snw35/nvchecker), automatically updates itself.
 
 ## Requirements
 

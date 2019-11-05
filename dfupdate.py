@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# DFUPDATE_VERSION 0.0.4
+# DFUPDATE_VERSION 0.0.5
 
 import argparse
 import configparser
@@ -54,7 +54,7 @@ try:
         config.read(configFileName)
         baseImageRegex = config['DEFAULT'].get('baseImageRegex', ('.*'))
 except FileNotFoundError:
-    print(versionFileName + " not found, unable to continue, config file must be in current working directory.")
+    print(configFileName + " not found, unable to continue, config file must be in current working directory.")
     raise SystemExit
 
 try:

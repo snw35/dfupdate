@@ -5,7 +5,7 @@ COPY dfupdate.py /dfupdate.py
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 
 ENV REQUESTS_VERSION 2.22.0
-ENV DOCKERFILE_PARSE_VERSION 0.0.15
+ENV DOCKERFILE_PARSE_VERSION 0.0.16
 
 RUN apk --upgrade --no-cache add \
     bash \

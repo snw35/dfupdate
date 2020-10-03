@@ -4,6 +4,7 @@ COPY dfupdate.py /dfupdate.py
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 
+ENV DFUPDATE_VERSION 0.0.5
 ENV REQUESTS_VERSION 2.24.0
 ENV DOCKERFILE_PARSE_VERSION 1.0.0
 

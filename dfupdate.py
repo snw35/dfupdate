@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 
-# DFUPDATE_VERSION 0.0.5
+# DFUPDATE_VERSION 0.0.6
 
 import argparse
 import configparser
 from pkg_resources import parse_version
 from pkg_resources import safe_version
-from urllib.parse import urlparse
-import urllib.request
 import os
 import glob
 from dockerfile_parse import DockerfileParser
@@ -25,15 +23,19 @@ def getNvcheckVersions(versionFileName):
         return nvcheckDict
 
 def get_remote_sha(url):
-    block_size = 65536
     try:
-        with urllib.request.urlopen(url) as remoteFile:
+        with requests.get(url, timeout=10) as r:
             sha256 = hashlib.sha256()
-            for block in iter(lambda: remoteFile.read(block_size), b''):
-                sha256.update(block)
+            for chunk in r.iter_content(chunk_size=1024):
+                sha256.update(chunk)
             return sha256.hexdigest()
-    except HTTPError:
-        print("Unable to retrive URL: " + url)
+    except requests.exceptions.Timeout:
+        print("Timeout, unable to retrive URL: " + url)
+    except requests.exceptions.TooManyRedirects:
+        print("Too many redirects, unable to retrive URL: " + url)
+    except requests.exceptions.RequestException as e:
+        print("Requests error, unable to retrive URL: " + url)
+        raise SystemExit(e)
 
 # Set variables
 updated = False

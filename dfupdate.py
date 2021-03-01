@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# DFUPDATE_VERSION 0.0.6
+# DFUPDATE_VERSION 0.1.0
 
 import argparse
 import configparser
@@ -17,10 +17,7 @@ import re
 def getNvcheckVersions(versionFileName):
     nvcheckDict = {}
     with open(versionFileName, 'r') as versionFile:
-        for line in versionFile:
-            software, version = line.split()
-            nvcheckDict[software] = version
-        return nvcheckDict
+        return json.load(versionFile)
 
 def get_remote_sha(url):
     try:
@@ -40,8 +37,17 @@ def get_remote_sha(url):
 # Set variables
 updated = False
 configFileName = os.getcwd() + "/dfupdate.conf"
-versionFileName = os.getcwd() + "/new_ver.txt"
-dockerFileName = os.getcwd() + "/Dockerfile"
+
+try:
+    with open(configFileName, 'r'):
+        config = configparser.ConfigParser()
+        config.read(configFileName)
+        baseImageRegex = config['DEFAULT'].get('baseImageRegex', ('.*'))
+        versionFileName = config['DEFAULT'].get('versionFileName', (os.getcwd() + '/new_ver.json'))
+        dockerFileName = config['DEFAULT'].get('dockerFileName', (os.getcwd() + '/Dockerfile'))
+except FileNotFoundError:
+    print(configFileName + " not found, unable to continue, config file must be in current working directory.")
+    raise SystemExit
 
 try:
     with open(versionFileName, 'r'):
@@ -49,15 +55,6 @@ try:
 except FileNotFoundError:
     nvcheckDict = {}
     print(versionFileName + " not found, continuing with Dockerfile base image check only.")
-
-try:
-    with open(configFileName, 'r'):
-        config = configparser.ConfigParser()
-        config.read(configFileName)
-        baseImageRegex = config['DEFAULT'].get('baseImageRegex', ('.*'))
-except FileNotFoundError:
-    print(configFileName + " not found, unable to continue, config file must be in current working directory.")
-    raise SystemExit
 
 try:
     with open(dockerFileName, 'r+') as dFile:
@@ -137,9 +134,9 @@ try:
             for software in softwareList:
                 try:
                     if nvcheckDict[software] == versionDict[software]:
-                        print(software + " was found in both new_ver.txt and Dockerfile and has same version")
+                        print(software + " was found in both " + versionFileName + " and " + dockerFileName + " and has same version")
                     else:
-                        print(software + " was found in both new_ver.txt and Dockerfile and has different versions")
+                        print(software + " was found in both " + versionFileName + " and " + dockerFileName + " and has different versions")
                         dfp.envs[software + "_VERSION"] = str(nvcheckDict[software])
                         if shaDict[software]:
                             fullUrl = urlDict[software] + "/" + filenameDict[software]
@@ -149,7 +146,7 @@ try:
 
                         updated = True
                 except KeyError as e:
-                    print(software + " was not found in both new_ver.txt and Dockerfile")
+                    print(software + " was not found in either " + versionFileName + " or " + dockerFileName)
 
         if updated:
             print(dockerFileName + " has been updated!")
@@ -157,5 +154,5 @@ try:
             print("No update necessary for " + dockerFileName)
 
 except FileNotFoundError:
-    print(dockerFileName + " not found, must be in current working directory.")
+    print(dockerFileName + " not found.")
     raise SystemExit

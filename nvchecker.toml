@@ -1,0 +1,11 @@
+[__config__]
+oldver = "old_ver.json"
+newver = "new_ver.json"
+
+[REQUESTS]
+source = "pypi"
+pypi = "requests"
+
+[DOCKERFILE_PARSE]
+source = "pypi"
+pypi = "dockerfile_parse"

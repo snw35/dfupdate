@@ -9,13 +9,33 @@ Python script to automatically update both the base image and included software 
 
 This image, working with [snw35/nvchecker](https://github.com/snw35/nvchecker), automatically updates itself.
 
+**NOTE:** compatible with nvchecker versions 2.x and above.
+
 ## Requirements
 
-Must have `Dockerfile`, `dfupdate.conf` config file (outlined below), and `new_ver.txt` in the current working directory when run.
+Requires a `dfupdate.conf` config file in the current working directory when run.
+
+This file has the following contents:
+
+```
+[DEFAULT]
+
+# A regex used to filter tags when updating the Dockerfile base image
+# Defaults to '.*'
+baseImageRegex = ''
+
+# Full path to the file containing nvchecker new versions (newver config entry)
+# Defaults to './new_ver.json'
+versionFileName = ''
+
+# Full path to the Dockerfile to update
+# Defaults to './Dockerfile'
+dockerFileName = ''
+```
 
 It will:
- * Use the regex stored in `dfupdate.conf` to search for an updated base image.
- * Use the versions stored in `new_ver.txt` to update the software installed in the Dockerfile.
+ * Use `baseImageRegex` to search for an updated base image tag and write it into the Dockerfile at `dockerFileName`.
+ * Use the versions stored in `versionFileName` to update the software in the Dockerfile at `dockerFileName`.
 
 ### Required ENV Variables
 
@@ -62,7 +82,7 @@ baseImageRegex = '\d+\.\d+\.?\d?'
 ```
 Set the `baseImageRegex` value to a regular expression that will match the base images you want. This is required to filter out e.g beta and release candidate versions, as Python's version parser will often select these otherwise. The example given is suitable for alpine.
 
-### The new_ver.txt file
+### The new_ver.json file
 
 This file is the output from [nvchecker](https://github.com/lilydjwg/nvchecker), run from [snw35/nvchecker](https://github.com/snw35/nvchecker).
 

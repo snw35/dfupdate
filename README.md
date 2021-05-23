@@ -1,6 +1,6 @@
 # dfupdate
 
-* [Travis CI: ![Build Status](https://travis-ci.org/snw35/dfupdate.svg?branch=master)](https://travis-ci.org/snw35/dfupdate)
+* [Travis CI: ![Build Status](https://travis-ci.com/snw35/dfupdate.svg?branch=master)](https://travis-ci.com/github/snw35/dfupdate)
 * [Dockerhub: snw35/dfupdate](https://hub.docker.com/r/snw35/dfupdate)
 
 Dockerfile Automatic Updater.

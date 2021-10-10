@@ -1,4 +1,4 @@
-FROM python:3.9.7-alpine3.14
+FROM python:3.10-alpine3.14
 
 COPY dfupdate.py /dfupdate.py
 

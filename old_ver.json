@@ -1,4 +1,4 @@
 {
   "DOCKERFILE_PARSE": "1.2.0",
-  "REQUESTS": "2.27.1"
+  "REQUESTS": "2.28.0"
 }

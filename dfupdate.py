@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# DFUPDATE_VERSION 0.1.0
+# DFUPDATE_VERSION 0.2.0
 
 import argparse
 import configparser
@@ -36,25 +36,16 @@ def get_remote_sha(url):
 
 # Set variables
 updated = False
-configFileName = os.getcwd() + "/dfupdate.conf"
-
-try:
-    with open(configFileName, 'r'):
-        config = configparser.ConfigParser()
-        config.read(configFileName)
-        baseImageRegex = config['DEFAULT'].get('baseImageRegex', ('.*'))
-        versionFileName = config['DEFAULT'].get('versionFileName', (os.getcwd() + '/new_ver.json'))
-        dockerFileName = config['DEFAULT'].get('dockerFileName', (os.getcwd() + '/Dockerfile'))
-except FileNotFoundError:
-    print(configFileName + " not found, unable to continue, config file must be in current working directory.")
-    raise SystemExit
+versionFileName = (os.getcwd() + '/new_ver.json')
+dockerFileName = (os.getcwd() + '/Dockerfile')
 
 try:
     with open(versionFileName, 'r'):
         nvcheckDict = getNvcheckVersions(versionFileName)
 except FileNotFoundError:
     nvcheckDict = {}
-    print(versionFileName + " not found, continuing with Dockerfile base image check only.")
+    print(versionFileName + " not found, must be in the current working directory.")
+    raise SystemExit
 
 try:
     with open(dockerFileName, 'r+') as dFile:
@@ -64,43 +55,28 @@ try:
         dfp.content = dFile.read()
         dockerfileImage,dockerfileTag = dfp.baseimage.split(':')
 
-        # Get all versions of base image from dockerhub
-        baseImageMatches = []
-        baseImageRegexC = re.compile(baseImageRegex.strip("'"))
-
-        dhubTagsJson = json.loads((requests.get('https://registry.hub.docker.com/v1/repositories/' + str(dockerfileImage) + '/tags')).content)
-        for tag in dhubTagsJson:
-            if baseImageRegexC.search(tag["name"]):
-                baseImageMatches.append(tag["name"])
-
-        dhubTagVersions = [parse_version(safe_version(str(tag))) for tag in baseImageMatches]
-        dhubMaxVersion = max(dhubTagVersions)
-
         # Check base version for update
-        if dhubMaxVersion > parse_version(str(dockerfileTag)):
-            print("Base image has a newer version upstream: " + str(dhubMaxVersion))
-            dfp.baseimage = str(dockerfileImage + ':' + str(dhubMaxVersion))
-            updated = True
-
-        elif dhubMaxVersion == parse_version(str(dockerfileTag)):
-            print("Base image is up to date: " + str(dhubMaxVersion))
-
-        elif dhubMaxVersion < parse_version(str(dockerfileTag)):
-            print("Base image is newer than latest release on dockerhub! Parse error? - " + str(dhubMaxVersion))
-
+        try:
+            if nvcheckDict["BASE"] != str(dockerfileTag):
+                print("Base image has a newer version upstream: " + str(nvcheckDict["BASE"]))
+                dfp.baseimage = str(dockerfileImage + ':' + str(nvcheckDict["BASE"]))
+                updated = True
+            else:
+                print("Base image is up to date: " + nvcheckDict["BASE"])
+        except KeyError as e:
+            print("No value for " + str(e) + " found in " + versionFileName + ", unable to update container base image.")
 
         # Get all software packages present in dockerfile
         softwareList = list()
         versionDict = {}
         for env in dfp.envs:
-            envsplit = env.split('_')
-            firstPart = env.rsplit('_', 1)[0]
-            lastWord = env.split('_')[-1]
+            sofwareName = env.rsplit('_', 1)[0]
+            softwareAttribute = env.split('_')[-1]
 
-            if (lastWord == "VERSION") and (dfp.envs[env]):
-                print("Found a version number for " + firstPart + " " + dfp.envs[env])
-                softwareList.append(firstPart)
-                versionDict[firstPart] = dfp.envs[env]
+            if (softwareAttribute == "VERSION") and (dfp.envs[env]):
+                print("Found a version number for " + sofwareName + " " + dfp.envs[env])
+                softwareList.append(sofwareName)
+                versionDict[sofwareName] = dfp.envs[env]
 
         # Get all attributes of each software package
         urlDict = {}
@@ -154,5 +130,5 @@ try:
             print("No update necessary for " + dockerFileName)
 
 except FileNotFoundError:
-    print(dockerFileName + " not found.")
+    print(dockerFileName + " not found, must be in the current working directory.")
     raise SystemExit

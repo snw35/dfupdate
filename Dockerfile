@@ -1,11 +1,11 @@
-FROM python:3.12.3-alpine3.19
+FROM python:3.12.4-alpine3.20
 
 COPY dfupdate.py /dfupdate.py
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 
 ENV DFUPDATE_VERSION 0.2.0
-ENV REQUESTS_VERSION 2.31.0
+ENV REQUESTS_VERSION 2.32.3
 ENV DOCKERFILE_PARSE_VERSION 2.0.1
 
 RUN apk --upgrade --no-cache add \

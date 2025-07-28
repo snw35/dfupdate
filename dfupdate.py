@@ -123,17 +123,18 @@ class DFUpdater:
                     current_version,
                     new_version,
                 )
-                self.dfp.envs[f"{sw}_VERSION"] = str(new_version)
                 if sw in sha_dict and sw in url_dict and sw in filename_dict:
                     full_url = url_dict[sw] + "/" + filename_dict[sw]
                     full_url = full_url.replace(current_version, str(new_version))
                     logger.info("Retrieving new SHA256 for %s from %s", sw, full_url)
                     new_sha = get_remote_sha(full_url)
                     if new_sha:
+                        self.dfp.envs[f"{sw}_VERSION"] = str(new_version)
                         self.dfp.envs[f"{sw}_SHA256"] = new_sha
+                        self.updated = True
                     else:
                         logger.error("Got empty shasum! Skipping %s", sw)
-                self.updated = True
+                        self.updated = False
         if self.updated:
             self._atomic_write_dockerfile(self.dfp.content)
             logger.info("%s has been updated!", self.dockerfile)
@@ -160,16 +161,17 @@ class DFUpdater:
         except (OSError, shutil.Error) as e:
             logger.error("Failed moving temporary Dockerfile to final location: %s", e)
             raise
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except (
+                    OSError,
+                    FileNotFoundError,
+                    PermissionError,
+                ):
+                    pass  # Avoid raising in cleanup
         logger.debug("Dockerfile atomically updated.")
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except (
-                OSError,
-                FileNotFoundError,
-                PermissionError,
-            ):
-                pass  # Avoid raising in cleanup
 
     def update(self):
         """
@@ -208,7 +210,7 @@ def get_nvcheck_versions(version_file: str) -> Dict:
         try:
             return json.load(f)
         except json.JSONDecodeError as e:
-            logger.error("JSON decode error for %s", f)
+            logger.error("JSON decode error for %s", version_file)
             raise e
 
 
@@ -280,7 +282,11 @@ def main():
     if args.print_log:
         logger.info("Printing log to stdout")
     updater = DFUpdater(args.version_file, args.dockerfile)
-    updater.update()
+    try:
+        updater.update()
+    except (OSError, FileNotFoundError, PermissionError, UnicodeEncodeError) as e:
+        logger.exception("Update failed: %s", e)
+        sys.exit(1)
     sys.exit(0)
 
 

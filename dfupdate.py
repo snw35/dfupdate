@@ -240,7 +240,7 @@ def parse_args():
     Parse command line arguments
     """
     parser = argparse.ArgumentParser(
-        description="Update Dockerfile based on nvchecker output"
+        description="Updates a given Dockerfile based on an nvchecker output file."
     )
     parser.add_argument(
         "-n",

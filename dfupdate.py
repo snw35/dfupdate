@@ -79,9 +79,9 @@ class DFUpdater:
         software to update
         """
         software_packages = {
-            env.rsplit("_", 1)[0]: self.dfp.envs[env]
-            for env in self.dfp.envs
-            if env.endswith("_VERSION") and self.dfp.envs[env]
+            key.rsplit("_", 1)[0]: value
+            for key, value in self.dfp.envs.items()
+            if key.endswith("_VERSION") and value
         }
         # Respect upgrade flag; build filtered list
         filtered_software = []

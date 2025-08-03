@@ -1,5 +1,5 @@
 {
-  "BASE": "3.12.5-alpine3.20",
+  "BASE": "3.13.5-alpine3.22",
   "DOCKERFILE_PARSE": "2.0.1",
-  "REQUESTS": "2.32.3"
+  "REQUESTS": "2.32.4"
 }

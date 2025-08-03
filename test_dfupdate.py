@@ -4,12 +4,13 @@ Unit tests for dfupdater
 
 import unittest
 from unittest import mock
-from dfupdate import DFUpdater
+import requests
+import dfupdate
 
 
 class TestDFUpdater(unittest.TestCase):
     """
-    Test class for dfupdater
+    Tests for main DFUpdater class
     """
 
     def setUp(self):
@@ -22,7 +23,7 @@ class TestDFUpdater(unittest.TestCase):
         self.mock_logger = patcher.start()
         self.version_file = "new_ver.json"
         self.dockerfile = "Dockerfile"
-        self.updater = DFUpdater(self.version_file, self.dockerfile)
+        self.updater = dfupdate.DFUpdater(self.version_file, self.dockerfile)
 
         parser = mock.patch("dockerfile_parse.DockerfileParser")
         self.addCleanup(parser.stop)
@@ -130,6 +131,104 @@ class TestDFUpdater(unittest.TestCase):
             mparse.assert_called_once()
             mbase.assert_called_once()
             msoft.assert_called_once()
+
+
+class TestTopLevelFunctions(unittest.TestCase):
+    """
+    Test functions outside of the main
+    DFUpdater class
+    """
+
+    @mock.patch("logging.basicConfig")
+    def test_configure_logger(self, mock_basic_config):
+        """
+        Set up mock logger
+        """
+        dfupdate.logger.handlers.clear()
+        dfupdate.configure_logger(level=42, print_log=False)
+        mock_basic_config.assert_called_once()
+        # Check that a handler is added when print_log=True
+        with mock.patch.object(dfupdate.logger, "addHandler") as mock_add_handler:
+            dfupdate.configure_logger(level=42, print_log=True)
+            mock_add_handler.assert_called()
+
+    @mock.patch(
+        "builtins.open", new_callable=mock.mock_open, read_data='{"FOO": "1.0"}'
+    )
+    def test_get_nvcheck_versions_valid(self, mock_open):
+        """
+        Test loading a valid version
+        """
+        result = dfupdate.get_nvcheck_versions("dummy.json")
+        self.assertEqual(result, {"FOO": "1.0"})
+        mock_open.assert_called_with("dummy.json", "r", encoding="utf8")
+
+    @mock.patch("builtins.open", new_callable=mock.mock_open, read_data="{bad json}")
+    def test_get_nvcheck_versions_invalid_json(self, _mock_open):
+        """
+        Test invalid JSON
+        """
+        with self.assertRaises(Exception):
+            dfupdate.get_nvcheck_versions("dummy.json")
+
+    @mock.patch("requests.get")
+    def test_get_remote_sha_success(self, mock_get):
+        """
+        Test successful shasum calculation
+        """
+
+        class FakeResponse:
+            """
+            Provide a fake response
+            """
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+            def raise_for_status(self):
+                """
+                Pass
+                """
+
+            def iter_content(self, chunk_size=1024):
+                """
+                Fake output
+                """
+                _ = chunk_size
+                yield b"abc"
+
+        mock_get.return_value = FakeResponse()
+        result = dfupdate.get_remote_sha("http://example.com")
+        self.assertIsInstance(result, str)
+
+    @mock.patch(
+        "requests.get", side_effect=requests.exceptions.RequestException("fail")
+    )
+    def test_get_remote_sha_failure(self, _mock_get):
+        """
+        Test an exception when fetching remote file
+        """
+        result = dfupdate.get_remote_sha("http://fail")
+        self.assertIsNone(result)
+
+    @mock.patch("argparse.ArgumentParser.parse_args")
+    def test_parse_args(self, mock_parse_args):
+        """
+        Test argument parsing
+        """
+        mock_args = mock.Mock()
+        mock_args.version_file = "file.json"
+        mock_args.dockerfile = "Dockerfile"
+        mock_args.log_level = "DEBUG"
+        mock_args.print_log = True
+        mock_parse_args.return_value = mock_args
+        args = dfupdate.parse_args()
+        self.assertEqual(args.version_file, "file.json")
+        self.assertEqual(args.log_level, "DEBUG")
+        self.assertTrue(args.print_log)
 
 
 if __name__ == "__main__":

@@ -142,15 +142,11 @@ class TestTopLevelFunctions(unittest.TestCase):
     @mock.patch("logging.basicConfig")
     def test_configure_logger(self, mock_basic_config):
         """
-        Set up mock logger
+        Test that logger is set up
         """
         dfupdate.logger.handlers.clear()
-        dfupdate.configure_logger(level=42, print_log=False)
+        dfupdate.configure_logger()
         mock_basic_config.assert_called_once()
-        # Check that a handler is added when print_log=True
-        with mock.patch.object(dfupdate.logger, "addHandler") as mock_add_handler:
-            dfupdate.configure_logger(level=42, print_log=True)
-            mock_add_handler.assert_called()
 
     @mock.patch(
         "builtins.open", new_callable=mock.mock_open, read_data='{"FOO": "1.0"}'
@@ -223,12 +219,10 @@ class TestTopLevelFunctions(unittest.TestCase):
         mock_args.version_file = "file.json"
         mock_args.dockerfile = "Dockerfile"
         mock_args.log_level = "DEBUG"
-        mock_args.print_log = True
         mock_parse_args.return_value = mock_args
         args = dfupdate.parse_args()
         self.assertEqual(args.version_file, "file.json")
         self.assertEqual(args.log_level, "DEBUG")
-        self.assertTrue(args.print_log)
 
 
 if __name__ == "__main__":

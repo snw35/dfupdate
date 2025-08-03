@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
-DFUPDATE_VERSION 0.3.0
-
-Updates a given Dockerfile based on the configuration
-and output of nvchecker.
+Updates a given Dockerfile based on the output of nvchecker.
 """
 
 import argparse
@@ -186,20 +183,18 @@ class DFUpdater:
         self.update_software()
 
 
-def configure_logger(level=logging.INFO, print_log=False):
+def configure_logger(level=logging.INFO):
     """
-    Configure existing module level logger
+    Configure module level logger.
+    Prints to standard out only, so no log files
+    can interfere with git change detection in repos.
     """
     if logger.hasHandlers():
         logger.handlers.clear()
     logging.basicConfig(
-        filename="dfupdate.log",
         level=level,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-    if print_log:
-        stdout_handler = logging.StreamHandler(sys.stdout)
-        logger.addHandler(stdout_handler)
 
 
 def get_nvcheck_versions(version_file: str) -> Dict:
@@ -262,13 +257,6 @@ def parse_args():
         default="INFO",
         help="Logging level (default: INFO)",
     )
-    parser.add_argument(
-        "-p",
-        "--print-log",
-        dest="print_log",
-        action="store_true",
-        help="Print log to stdout as well as logfile",
-    )
     return parser.parse_args()
 
 
@@ -278,9 +266,7 @@ def main():
     """
     args = parse_args()
     log_level = getattr(logging, args.log_level.upper(), logging.INFO)
-    configure_logger(level=log_level, print_log=args.print_log)
-    if args.print_log:
-        logger.info("Printing log to stdout")
+    configure_logger(level=log_level)
     updater = DFUpdater(args.version_file, args.dockerfile)
     try:
         updater.update()

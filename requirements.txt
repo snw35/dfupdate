@@ -1,2 +1,3 @@
 requests
 dockerfile_parse
+tenacity

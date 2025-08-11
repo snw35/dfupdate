@@ -7,6 +7,10 @@ source = "container"
 container = "library/python"
 include_regex = "\\d+\\.\\d+\\.?\\d?-alpine\\d\\.\\d+"
 
+[TENACITY]
+source = "pypi"
+pypi = "tenacity"
+
 [REQUESTS]
 source = "pypi"
 pypi = "requests"

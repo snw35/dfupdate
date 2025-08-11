@@ -1,5 +1,6 @@
 {
-  "BASE": "3.13.5-alpine3.22",
+  "BASE": "3.13.6-alpine3.22",
   "DOCKERFILE_PARSE": "2.0.1",
-  "REQUESTS": "2.32.4"
+  "REQUESTS": "2.32.4",
+  "TENACITY": "9.1.2"
 }

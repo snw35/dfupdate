@@ -11,10 +11,16 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import Dict, Optional
 
 import requests
 from dockerfile_parse import DockerfileParser
+from tenacity import (
+    retry,
+    wait_exponential,
+    stop_after_attempt,
+    retry_if_exception_type,
+    before_sleep_log,
+)
 
 logger = logging.getLogger("dfupdate")
 
@@ -197,7 +203,7 @@ def configure_logger(level=logging.INFO):
     )
 
 
-def get_nvcheck_versions(version_file: str) -> Dict:
+def get_nvcheck_versions(version_file: str):
     """
     Load versions from nvchecker JSON file
     """
@@ -209,20 +215,44 @@ def get_nvcheck_versions(version_file: str) -> Dict:
             raise e
 
 
-def get_remote_sha(url: str, timeout: int = 10) -> Optional[str]:
+@retry(
+    retry=retry_if_exception_type(
+        (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.TooManyRedirects,
+            requests.exceptions.RequestException,
+        )
+    ),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    stop=stop_after_attempt(3),
+    before_sleep=before_sleep_log(logger, logging.INFO),
+    reraise=True,
+)
+def get_remote_sha(url: str, timeout: int = 10) -> str | None:
     """
-    Fetch the new software version and compute shasum
-    to save into the Dockerfile
+    Fetch a remote file and compute its sha256 checksum, with retry logic.
+    Returns the sha256 as a hex string, or None if it fails.
+    Retries on network errors with exponential backoff.
     """
     try:
-        with requests.get(url, timeout=timeout) as r:
+        with requests.get(url, timeout=timeout, stream=True) as r:
             r.raise_for_status()
             sha256 = hashlib.sha256()
             for chunk in r.iter_content(chunk_size=1024):
                 sha256.update(chunk)
             return sha256.hexdigest()
+    except requests.exceptions.HTTPError as e:
+        logger.error(
+            "HTTP error %s for URL: %s",
+            e.response.status_code if e.response else "Unknown",
+            url,
+        )
+        return None
     except requests.exceptions.Timeout:
         logger.error("Timeout, unable to retrieve URL: %s", url)
+    except requests.exceptions.ConnectionError:
+        logger.error("Connection error, unable to retrieve URL: %s", url)
     except requests.exceptions.TooManyRedirects:
         logger.error("Too many redirects, unable to retrieve URL: %s", url)
     except requests.exceptions.RequestException as e:

@@ -117,15 +117,12 @@ class TestDFUpdater(unittest.TestCase):
         """
         Check that calling update calls all the major steps, using spies
         """
-        with mock.patch.object(
-            self.updater, "load_versions"
-        ) as mload, mock.patch.object(
-            self.updater, "parse_dockerfile"
-        ) as mparse, mock.patch.object(
-            self.updater, "update_base"
-        ) as mbase, mock.patch.object(
-            self.updater, "update_software"
-        ) as msoft:
+        with (
+            mock.patch.object(self.updater, "load_versions") as mload,
+            mock.patch.object(self.updater, "parse_dockerfile") as mparse,
+            mock.patch.object(self.updater, "update_base") as mbase,
+            mock.patch.object(self.updater, "update_software") as msoft,
+        ):
             self.updater.update()
             mload.assert_called_once()
             mparse.assert_called_once()

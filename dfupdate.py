@@ -32,161 +32,124 @@ class DFUpdater:
     a given Dockerfile.
     """
 
-    def __init__(self, version_file: str, dockerfile: str):
+    def __init__(self, nvcheck_file: str, dockerfile: str):
         """
-        Set up class attributes
+        Define class attributes
         """
-        self.version_file = version_file
-        self.dockerfile = dockerfile
-        self.nvcheck = {}
-        self.updated = False
         self.dfp = DockerfileParser()
+        # Paths to dockerfile and nvchecker file
+        self.nvcheck_file = nvcheck_file
+        self.dockerfile = dockerfile
+        # Map of software and version found in dockerfile
+        self.dockerfile_versions = {}
+        # Nvcheck JSON
+        self.nvcheck_json = {}
+        # Global update flag
+        self.updated = False
 
-    def load_versions(self):
+    def get_dockerfile_versions(self):
         """
-        Load all software versions from nvchecker JSON file
+        Create list of software and versions found in dockerfile
         """
-        if not os.path.isfile(self.version_file):
-            logger.error("%s not found. Must be present.", self.version_file)
-            raise FileNotFoundError(self.version_file)
-        self.nvcheck = get_nvcheck_versions(self.version_file)
+        self.dfp.content = load_file(self.dockerfile)
 
-    def parse_dockerfile(self):
-        """
-        Parse and return Dockerfile contents
-        """
-        if not os.path.isfile(self.dockerfile):
-            logger.error("%s not found. Must be present.", self.dockerfile)
-            raise FileNotFoundError(self.dockerfile)
-        with open(self.dockerfile, "r", encoding="utf8") as dfile:
-            content = dfile.read()
-        self.dfp.content = content
-
-    def update_base(self):
-        """
-        Update base image if needed
-        """
-        base_image, base_tag = self.dfp.baseimage.rsplit(":", 1)
-        if self.nvcheck.get("BASE") and self.nvcheck["BASE"] != str(base_tag):
-            logger.info(
-                "Base image out of date: %s -> %s", base_tag, self.nvcheck["BASE"]
-            )
-            self.dfp.baseimage = f"{base_image}:{self.nvcheck['BASE']}"
-            self.updated = True
-        else:
-            logger.info("Base image is up to date: %s", base_tag)
-
-    def update_software(self):
-        """
-        Identify all _VERSION variables and build lists of
-        software to update
-        """
         software_packages = {
             key.rsplit("_", 1)[0]: value
             for key, value in self.dfp.envs.items()
             if key.endswith("_VERSION") and value
         }
-        # Respect upgrade flag; build filtered list
-        filtered_software = []
-        for sw in software_packages:
+        for sw, ver in software_packages.items():
             upgrade_flag = self.dfp.envs.get(f"{sw}_UPGRADE", "true").lower()
             if upgrade_flag == "false":
                 logger.info("%s upgrade set to false, skipping.", sw)
                 continue
-            filtered_software.append(sw)
+            self.dockerfile_versions[sw] = ver
 
-        # Package attributes for each software
-        url_dict = {
-            sw: self.dfp.envs.get(f"{sw}_URL")
-            for sw in filtered_software
-            if self.dfp.envs.get(f"{sw}_URL")
-        }
-        filename_dict = {
-            sw: self.dfp.envs.get(f"{sw}_FILENAME")
-            for sw in filtered_software
-            if self.dfp.envs.get(f"{sw}_FILENAME")
-        }
-        sha_dict = {
-            sw: self.dfp.envs.get(f"{sw}_SHA256")
-            for sw in filtered_software
-            if self.dfp.envs.get(f"{sw}_SHA256")
-        }
-        for sw in filtered_software:
-            current_version = software_packages[sw]
-            new_version = self.nvcheck.get(sw)
-            if new_version is None:
-                logger.warning("%s not found in %s, skipping.", sw, self.version_file)
-                continue
-            if new_version == current_version:
-                logger.info("%s is up to date: %s", sw, current_version)
-            else:
-                logger.info(
-                    "%s updating: %s -> %s",
-                    sw,
-                    current_version,
-                    new_version,
-                )
-                if sw in sha_dict and sw in url_dict and sw in filename_dict:
-                    full_url = url_dict[sw] + "/" + filename_dict[sw]
-                    full_url = full_url.replace(current_version, str(new_version))
-                    logger.info("Retrieving new SHA256 for %s from %s", sw, full_url)
-                    new_sha = get_remote_sha(full_url)
-                    if new_sha:
-                        self.dfp.envs[f"{sw}_VERSION"] = str(new_version)
-                        self.dfp.envs[f"{sw}_SHA256"] = new_sha
-                        self.updated = True
-                    else:
-                        logger.error("Got empty shasum! Skipping %s", sw)
-                        self.updated = False
-        if self.updated:
-            self._atomic_write_dockerfile(self.dfp.content)
-            logger.info("%s has been updated!", self.dockerfile)
+    def get_nvcheck_json(self):
+        """
+        Parse the nvcheck file content into JSON
+        """
+        try:
+            self.nvcheck_json = json.loads(load_file(self.nvcheck_file))
+        except json.JSONDecodeError as e:
+            logger.error("JSON decode error for %s", self.nvcheck_file)
+            raise e
+
+    def update_base(self):
+        """
+        Update base image if needed.
+        Handled separately from software as it always present and unique.
+        """
+        base_image, base_tag = self.dfp.baseimage.rsplit(":", 1)
+        base_version = get_nested(self.nvcheck_json, ["BASE", "version"])
+        if base_version != base_tag:
+            logger.info("Base image out of date: %s -> %s", base_tag, base_version)
+            self.dfp.baseimage = f"{base_image}:{base_version}"
+            logger.info("Base image updated.")
         else:
-            logger.info("No update necessary for %s", self.dockerfile)
+            logger.info("Base image is up to date: %s", base_tag)
 
-    def _atomic_write_dockerfile(self, new_content: str):
+    def check_software(self):
         """
-        Update the Dockerfile in an atomic operation
-        (temp file create and move in-place) to prevent
-        corruption and ensure consistent reads from CICD systems
+        Check identified software to see if an update is required, and call the update function if so.
         """
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=os.path.dirname(self.dockerfile), text=True
-        )
-        try:
-            with os.fdopen(temp_fd, "w", encoding="utf8") as temp_file:
-                temp_file.write(new_content)
-        except (OSError, ValueError, TypeError, UnicodeEncodeError) as e:
-            logger.error("Failed writing to temporary Dockerfile: %s", e)
-            raise
-        try:
-            shutil.move(temp_path, self.dockerfile)
-        except (OSError, shutil.Error) as e:
-            logger.error("Failed moving temporary Dockerfile to final location: %s", e)
-            raise
-        finally:
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except (
-                    OSError,
-                    FileNotFoundError,
-                    PermissionError,
-                ):
-                    pass  # Avoid raising in cleanup
-        logger.debug("Dockerfile atomically updated.")
+        for sw, ver in self.dockerfile_versions.items():
+            # Attempt newer nvchecker format first
+            new_ver = get_nested(self.nvcheck_json, [sw, "version"])
+            # Fall back to old format
+            if not new_ver:
+                new_ver = self.nvcheck_json.get(sw)
+                if not new_ver:
+                    logger.warning("Failed to find %s in %s", sw, self.nvcheck_file)
+                    continue
+            if new_ver == ver:
+                logger.info("%s is up to date", sw)
+            else:
+                self.updated = True
+                self.update_software(sw, str(new_ver), ver)
+        if self.updated:
+            atomic_write_file(self.dockerfile, self.dfp.content)
+            logger.info("%s has been updated!", self.dockerfile)
+
+    def update_software(self, sw: str, new_ver: str, ver: str):
+        """
+        Update the specified software to the specified version.
+        Version numbers are checked and validated by nvchecker external to this script, so assume they are valid until failure.
+        """
+        logger.info("Updating %s: %s -> %s", sw, ver, new_ver)
+        df_url = self.dfp.envs.get(f"{sw}_URL")
+        df_filename = self.dfp.envs.get(f"{sw}_FILENAME")
+        df_sha = self.dfp.envs.get(f"{sw}_SHA256")
+        if df_url and df_filename and df_sha:
+            full_url = df_url + "/" + df_filename
+            full_url = full_url.replace(ver, new_ver)
+            logger.info("Retrieving new SHA256 for %s from %s", sw, full_url)
+            new_sha = get_remote_sha(full_url)
+            if new_sha:
+                self.dfp.envs[f"{sw}_VERSION"] = new_ver
+                self.dfp.envs[f"{sw}_SHA256"] = new_sha
+            else:
+                logger.error("Got empty shasum! Skipping %s", sw)
+        else:
+            logger.warning(
+                "Attribute not found: URL:%s filename:%s sha:%s",
+                df_url,
+                df_filename,
+                df_sha,
+            )
 
     def update(self):
         """
-        Load software versions from nvchecker file
-        Parse Dockerfile for current versions
-        Update base image
-        Update all software
+        Class entrypoint. In order:
+        Get all discovered software names from the dockerfile.
+        Parse nvchecker file and load into JSON object.
+        Update the base image if needed.
+        Check each software package and updated if needed.
         """
-        self.load_versions()
-        self.parse_dockerfile()
+        self.get_dockerfile_versions()
+        self.get_nvcheck_json()
         self.update_base()
-        self.update_software()
+        self.check_software()
 
 
 def configure_logger(level=logging.INFO):
@@ -203,16 +166,46 @@ def configure_logger(level=logging.INFO):
     )
 
 
-def get_nvcheck_versions(version_file: str):
+def load_file(file_path: str):
     """
-    Load versions from nvchecker JSON file
+    Load file and return contents
     """
-    with open(version_file, "r", encoding="utf8") as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError as e:
-            logger.error("JSON decode error for %s", version_file)
-            raise e
+    if not os.path.isfile(file_path):
+        logger.error("%s not found. Must be present.", file_path)
+        raise FileNotFoundError(file_path)
+    with open(file_path, "r", encoding="utf8") as content:
+        return content.read()
+
+
+def atomic_write_file(file_path: str, new_content: str):
+    """
+    Update a file with new content in an atomic operation
+    (temp file create and move in-place) to prevent
+    corruption and ensure consistent reads from CICD systems
+    """
+    temp_fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(file_path), text=True)
+    try:
+        with os.fdopen(temp_fd, "w", encoding="utf8") as temp_file:
+            temp_file.write(new_content)
+    except (OSError, ValueError, TypeError, UnicodeEncodeError) as e:
+        logger.error("Failed writing to temporary file: %s", e)
+        raise
+    try:
+        shutil.move(temp_path, file_path)
+    except (OSError, shutil.Error) as e:
+        logger.error("Failed moving temporary file to final location: %s", e)
+        raise
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except (
+                OSError,
+                FileNotFoundError,
+                PermissionError,
+            ):
+                pass  # Avoid raising in cleanup
+    logger.debug("File atomically updated.")
 
 
 @retry(
@@ -270,7 +263,7 @@ def parse_args():
     parser.add_argument(
         "-n",
         "--nvchecker-file",
-        dest="version_file",
+        dest="nvcheck_file",
         default="new_ver.json",
         help="Path to nvchecker JSON (default: new_ver.json)",
     )
@@ -290,6 +283,49 @@ def parse_args():
     return parser.parse_args()
 
 
+def get_nested(data: dict, path: list[str]) -> str | None:
+    """
+    Recursively search for a sequence of keys anywhere in a nested JSON-like structure.
+
+    Args:
+        data: dict representing the JSON.
+        path: List of keys to follow, e.g. ["data", "BASE", "version"].
+
+    Returns:
+        A string containing the found value at the end of the path,
+        or None if nothing is found.
+    """
+    if not isinstance(data, dict):
+        return None
+
+    if not path:
+        return None
+
+    key, *rest = path
+
+    # If this is a dict and the key is present
+    if key in data:
+        if rest:
+            return get_nested(data[key], rest)
+        else:
+            return data[key]
+
+    # Recurse into values of the dict
+    for val in data.values():
+        if isinstance(val, dict):
+            found = get_nested(val, path)
+            if found:
+                return found
+        elif isinstance(val, list):
+            for item in val:
+                if isinstance(item, dict):
+                    found = get_nested(item, path)
+                    if found:
+                        return found
+
+    return None
+
+
 def main():
     """
     Set up argument parser, logger, and run dfupdater class
@@ -297,7 +333,7 @@ def main():
     args = parse_args()
     log_level = getattr(logging, args.log_level.upper(), logging.INFO)
     configure_logger(level=log_level)
-    updater = DFUpdater(args.version_file, args.dockerfile)
+    updater = DFUpdater(args.nvcheck_file, args.dockerfile)
     try:
         updater.update()
     except (OSError, FileNotFoundError, PermissionError, UnicodeEncodeError) as e:

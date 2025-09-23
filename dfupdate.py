@@ -125,21 +125,26 @@ class DFUpdater:
             current_ver: the current software version.
         """
         logger.info("Updating %s: %s -> %s", sw, current_ver, new_ver)
+
+        # Update bare ENV versions
+        self.dfp.envs[f"{sw}_VERSION"] = new_ver
+
+        # Check for remote URL and get new shasum
         df_url = self.dfp.envs.get(f"{sw}_URL")
         df_filename = self.dfp.envs.get(f"{sw}_FILENAME")
         df_sha = self.dfp.envs.get(f"{sw}_SHA256")
         if df_url and df_filename and df_sha:
+            logger.info("Found remote URL, fetching and calculating new shasum")
             full_url = df_url + "/" + df_filename
             full_url = full_url.replace(current_ver, new_ver)
             logger.info("Retrieving new SHA256 for %s from %s", sw, full_url)
             new_sha = get_remote_sha(full_url)
             if new_sha:
-                self.dfp.envs[f"{sw}_VERSION"] = new_ver
                 self.dfp.envs[f"{sw}_SHA256"] = new_sha
             else:
                 logger.error("Got empty shasum! Skipping %s", sw)
         else:
-            logger.warning(
+            logger.info(
                 "Attribute not found: URL:%s filename:%s sha:%s",
                 df_url,
                 df_filename,

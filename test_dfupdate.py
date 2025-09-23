@@ -2,7 +2,6 @@ import dfupdate
 import os
 import sys
 import types
-import tempfile
 import unittest
 from unittest import mock
 
@@ -23,19 +22,18 @@ class FakeDockerfileParser:
     @content.setter
     def content(self, value):
         self._content = value
-        # Simple parse: lines like "ENV KEY=VAL"
+        # Parse simple "ENV KEY=VAL [KEY2=VAL2 ...]" lines
         envs = {}
         for line in value.splitlines():
-            line = line.strip()
-            if line.startswith("ENV "):
-                rest = line[4:]
-                # handle multiple pairs: KEY=VAL KEY2=VAL2
-                parts = rest.split()
-                for part in parts:
-                    if "=" in part:
-                        k, v = part.split("=", 1)
-                        envs[k.strip()] = v.strip()
-        # Keep any pre-existing envs but overlay parsed ones
+            s = line.strip()
+            if not s.startswith("ENV "):
+                continue
+            parts = s[4:].split()
+            for part in parts:
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    envs[k.strip()] = v.strip()
+        # merge (overlay parsed entries)
         self.envs.update(envs)
 
 
@@ -63,11 +61,13 @@ class TestTopLevelUtilities(unittest.TestCase):
             dfupdate.configure_logger()
             m.assert_called_once()
 
-    def test_load_file_not_found(self):
+    def test_load_file_content_not_found(self):
         with self.assertRaises(FileNotFoundError):
-            dfupdate.load_file("nope.json")
+            dfupdate.load_file_content("nope.json")
 
     def test_atomic_write_file(self):
+        import tempfile
+
         with tempfile.TemporaryDirectory() as td:
             p = os.path.join(td, "file.txt")
             dfupdate.atomic_write_file(p, "hello")
@@ -128,34 +128,37 @@ class TestDFUpdater(unittest.TestCase):
         self.updater.dfp = FakeDockerfileParser()
 
     @mock.patch(
-        "dfupdate.load_file",
+        "dfupdate.load_file_content",
         return_value="FROM python:3.10\nENV FOO_VERSION=1.0\nENV BAR_VERSION=2.0 BAR_UPGRADE=false\n",
     )
     def test_get_dockerfile_versions_respects_upgrade_flag(self, _m):
+        # Populate envs by setting content (simulating Dockerfile reading done inside DFUpdater methods)
+        self.updater.dfp.content = "FROM python:3.10\nENV FOO_VERSION=1.0\nENV BAR_VERSION=2.0 BAR_UPGRADE=false\n"
+        # Call method; it reads envs from parser
         self.updater.get_dockerfile_versions()
         # BAR has upgrade=false and should be skipped
         self.assertEqual(self.updater.dockerfile_versions, {"FOO": "1.0"})
 
     @mock.patch(
-        "dfupdate.load_file",
+        "dfupdate.load_file_content",
         return_value='{"BASE":{"version":"3.11"},"FOO":{"version":"1.1"}}',
     )
     def test_get_nvcheck_json(self, _m):
-        self.updater.get_nvcheck_json()
-        self.assertEqual(self.updater.nvcheck_json["BASE"]["version"], "3.11")
+        nvj = self.updater.get_nvcheck_json()
+        self.assertEqual(nvj["BASE"]["version"], "3.11")
 
     def test_update_base_when_same(self):
         self.updater.dfp.baseimage = "python:3.11"
-        self.updater.nvcheck_json = {"BASE": {"version": "3.11"}}
+        nvj = {"BASE": {"version": "3.11"}}
         with mock.patch.object(dfupdate, "logger") as mlog:
-            self.updater.update_base()
+            self.updater.update_base(nvj)
             mlog.info.assert_any_call("Base image is up to date: %s", "3.11")
 
     def test_update_base_when_different(self):
         self.updater.dfp.baseimage = "python:3.10"
-        self.updater.nvcheck_json = {"BASE": {"version": "3.11"}}
+        nvj = {"BASE": {"version": "3.11"}}
         with mock.patch.object(dfupdate, "logger") as mlog:
-            self.updater.update_base()
+            self.updater.update_base(nvj)
             self.assertEqual(self.updater.dfp.baseimage, "python:3.11")
             mlog.info.assert_any_call("Base image updated.")
 
@@ -173,9 +176,9 @@ class TestDFUpdater(unittest.TestCase):
         # Detected software in Dockerfile
         self.updater.dockerfile_versions = {"FOO": "1.0"}
         # nvchecker says new version
-        self.updater.nvcheck_json = {"FOO": {"version": "2.0"}}
+        nvj = {"FOO": {"version": "2.0"}}
 
-        self.updater.check_software()
+        self.updater.check_software(nvj)
 
         # Should have updated envs
         self.assertEqual(self.updater.dfp.envs["FOO_VERSION"], "2.0")
@@ -197,10 +200,10 @@ class TestDFUpdater(unittest.TestCase):
         }
         self.updater.dfp.content = "x"
         self.updater.dockerfile_versions = {"FOO": "1.0"}
-        self.updater.nvcheck_json = {"FOO": {"version": "2.0"}}
+        nvj = {"FOO": {"version": "2.0"}}
 
         with mock.patch.object(dfupdate, "logger") as mlog:
-            self.updater.check_software()
+            self.updater.check_software(nvj)
             # Current implementation sets updated True before SHA is known,
             # so it still writes the Dockerfile.
             matomic.assert_called_once()

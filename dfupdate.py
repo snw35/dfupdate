@@ -34,25 +34,25 @@ class DFUpdater:
 
     def __init__(self, nvcheck_file: str, dockerfile: str):
         """
-        Define class attributes
+        Initilise class attributes and dockerfile parser.
+
+        Args:
+            nvcheck_file: absolute or relative path to nvchecker file.
+            dockerfile: absolute or relative path to dockerfile.
         """
-        self.dfp = DockerfileParser()
+        self.dfp = DockerfileParser(path=dockerfile)
         # Paths to dockerfile and nvchecker file
         self.nvcheck_file = nvcheck_file
         self.dockerfile = dockerfile
         # Map of software and version found in dockerfile
         self.dockerfile_versions = {}
-        # Nvcheck JSON
-        self.nvcheck_json = {}
         # Global update flag
         self.updated = False
 
     def get_dockerfile_versions(self):
         """
-        Create list of software and versions found in dockerfile
+        Create list of software and versions found in dockerfile.
         """
-        self.dfp.content = load_file(self.dockerfile)
-
         software_packages = {
             key.rsplit("_", 1)[0]: value
             for key, value in self.dfp.envs.items()
@@ -65,23 +65,24 @@ class DFUpdater:
                 continue
             self.dockerfile_versions[sw] = ver
 
-    def get_nvcheck_json(self):
-        """
-        Parse the nvcheck file content into JSON
-        """
+    def get_nvcheck_json(self) -> dict:
+        nvcheck_content = load_file_content(self.nvcheck_file)
         try:
-            self.nvcheck_json = json.loads(load_file(self.nvcheck_file))
+            return json.loads(nvcheck_content)
         except json.JSONDecodeError as e:
             logger.error("JSON decode error for %s", self.nvcheck_file)
             raise e
 
-    def update_base(self):
+    def update_base(self, nvcheck_json: dict):
         """
         Update base image if needed.
         Handled separately from software as it always present and unique.
+
+        Args:
+            nvcheck_json: dictionary containing parsed nvchecker file JSON.
         """
         base_image, base_tag = self.dfp.baseimage.rsplit(":", 1)
-        base_version = get_nested(self.nvcheck_json, ["BASE", "version"])
+        base_version = get_nested(nvcheck_json, ["BASE", "version"])
         if base_version != base_tag:
             logger.info("Base image out of date: %s -> %s", base_tag, base_version)
             self.dfp.baseimage = f"{base_image}:{base_version}"
@@ -89,16 +90,19 @@ class DFUpdater:
         else:
             logger.info("Base image is up to date: %s", base_tag)
 
-    def check_software(self):
+    def check_software(self, nvcheck_json: dict):
         """
         Check identified software to see if an update is required, and call the update function if so.
+
+        Args:
+            nvcheck_json: dictionary containing parsed nvchecker file JSON.
         """
         for sw, ver in self.dockerfile_versions.items():
             # Attempt newer nvchecker format first
-            new_ver = get_nested(self.nvcheck_json, [sw, "version"])
+            new_ver = get_nested(nvcheck_json, [sw, "version"])
             # Fall back to old format
             if not new_ver:
-                new_ver = self.nvcheck_json.get(sw)
+                new_ver = nvcheck_json.get(sw)
                 if not new_ver:
                     logger.warning("Failed to find %s in %s", sw, self.nvcheck_file)
                     continue
@@ -111,18 +115,22 @@ class DFUpdater:
             atomic_write_file(self.dockerfile, self.dfp.content)
             logger.info("%s has been updated!", self.dockerfile)
 
-    def update_software(self, sw: str, new_ver: str, ver: str):
+    def update_software(self, sw: str, new_ver: str, current_ver: str):
         """
-        Update the specified software to the specified version.
-        Version numbers are checked and validated by nvchecker external to this script, so assume they are valid until failure.
+        Update the specified software.
+
+        Args:
+            sw: the software name to update (as found in the dockerfile).
+            new_ver: the new version to update to.
+            current_ver: the current software version.
         """
-        logger.info("Updating %s: %s -> %s", sw, ver, new_ver)
+        logger.info("Updating %s: %s -> %s", sw, current_ver, new_ver)
         df_url = self.dfp.envs.get(f"{sw}_URL")
         df_filename = self.dfp.envs.get(f"{sw}_FILENAME")
         df_sha = self.dfp.envs.get(f"{sw}_SHA256")
         if df_url and df_filename and df_sha:
             full_url = df_url + "/" + df_filename
-            full_url = full_url.replace(ver, new_ver)
+            full_url = full_url.replace(current_ver, new_ver)
             logger.info("Retrieving new SHA256 for %s from %s", sw, full_url)
             new_sha = get_remote_sha(full_url)
             if new_sha:
@@ -140,16 +148,16 @@ class DFUpdater:
 
     def update(self):
         """
-        Class entrypoint. In order:
+        Class entrypoint. Operations in order are:
+        Parse nvcheck file JSON.
         Get all discovered software names from the dockerfile.
-        Parse nvchecker file and load into JSON object.
         Update the base image if needed.
         Check each software package and updated if needed.
         """
+        nvcheck_json = self.get_nvcheck_json()
         self.get_dockerfile_versions()
-        self.get_nvcheck_json()
-        self.update_base()
-        self.check_software()
+        self.update_base(nvcheck_json)
+        self.check_software(nvcheck_json)
 
 
 def configure_logger(level=logging.INFO):
@@ -157,6 +165,9 @@ def configure_logger(level=logging.INFO):
     Configure module level logger.
     Prints to standard out only, so no log files
     can interfere with git change detection in repos.
+
+    Args:
+        level: logging level to use.
     """
     if logger.hasHandlers():
         logger.handlers.clear()
@@ -166,9 +177,12 @@ def configure_logger(level=logging.INFO):
     )
 
 
-def load_file(file_path: str):
+def load_file_content(file_path: str):
     """
-    Load file and return contents
+    Load file and return contents as a string
+
+    Args:
+        file_path: path to file.
     """
     if not os.path.isfile(file_path):
         logger.error("%s not found. Must be present.", file_path)
@@ -182,6 +196,10 @@ def atomic_write_file(file_path: str, new_content: str):
     Update a file with new content in an atomic operation
     (temp file create and move in-place) to prevent
     corruption and ensure consistent reads from CICD systems
+
+    Args:
+        file_path: path to file.
+        new_content: new contents to write as a string.
     """
     temp_fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(file_path), text=True)
     try:
@@ -227,6 +245,13 @@ def get_remote_sha(url: str, timeout: int = 10) -> str | None:
     Fetch a remote file and compute its sha256 checksum, with retry logic.
     Returns the sha256 as a hex string, or None if it fails.
     Retries on network errors with exponential backoff.
+
+    Args:
+        url: the URL to fetch the file from.
+        timeout: the timeout to use in seconds, default 10.
+
+    Returns:
+        The sha256sum of the file as a string.
     """
     try:
         with requests.get(url, timeout=timeout, stream=True) as r:

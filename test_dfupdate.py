@@ -5,7 +5,6 @@ import types
 import unittest
 from unittest import mock
 
-# ---- Inject a fake dockerfile_parse module BEFORE importing dfupdate ----
 fake_mod = types.ModuleType("dockerfile_parse")
 
 

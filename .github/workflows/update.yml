@@ -18,7 +18,7 @@ on:
 
 jobs:
   call-upstream-workflow:
-    uses: snw35/cicd/.github/workflows/github.yaml@main
+    uses: snw35/cicd/.github/workflows/github.yaml@fix-perms
     with:
       IMAGE_TAG: 'DFUPDATE_VERSION'
     secrets: inherit

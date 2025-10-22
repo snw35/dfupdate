@@ -1,6 +1,6 @@
 # dfupdate
 
-* [Build Status](https://github.com/snw35/dfupdate/actions/workflows/update.yml/badge.svg)
+* ![Build Status](https://github.com/snw35/dfupdate/actions/workflows/update.yml/badge.svg)
 * [Dockerhub: snw35/dfupdate](https://hub.docker.com/r/snw35/dfupdate)
 
 Dockerfile Updater.

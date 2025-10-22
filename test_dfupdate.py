@@ -36,7 +36,7 @@ class FakeDockerfileParser:
         self.envs.update(envs)
 
 
-fake_mod.DockerfileParser = FakeDockerfileParser
+fake_mod.DockerfileParser = FakeDockerfileParser  # type: ignore[attr-defined]
 sys.modules.setdefault("dockerfile_parse", fake_mod)
 
 
@@ -124,7 +124,7 @@ class TestDFUpdater(unittest.TestCase):
         # Fresh updater with fake parser inside dfupdate
         self.updater = dfupdate.DFUpdater("new_ver.json", "Dockerfile")
         # Replace dfp with a fresh fake parser instance we can control
-        self.updater.dfp = FakeDockerfileParser()
+        self.updater.dfp = FakeDockerfileParser()  # type: ignore[attr-defined]
 
     @mock.patch(
         "dfupdate.load_file_content",
@@ -207,6 +207,62 @@ class TestDFUpdater(unittest.TestCase):
             # so it still writes the Dockerfile.
             matomic.assert_called_once()
             mlog.error.assert_any_call("Got empty shasum! Skipping %s", "FOO")
+
+    @mock.patch.object(dfupdate, "atomic_write_file")
+    def test_update_software_rollback_on_unknown_http_error(self, matomic):
+        # Given: Dockerfile has FOO v1.0 and download metadata
+        self.updater.dfp.envs = {
+            "FOO_VERSION": "1.0",
+            "FOO_URL": "https://example.com/files",
+            "FOO_FILENAME": "foo-1.0-linux.tgz",
+            "FOO_SHA256": "oldsha",
+        }
+        self.updater.dfp.content = "x"
+        self.updater.dockerfile_versions = {"FOO": "1.0"}
+
+        # And nvchecker says 2.0 is available
+        nvj = {"FOO": {"version": "2.0"}}
+
+        # When: fetching SHA raises an HTTPError with no status (Unknown)
+        class FakeResp:
+            def __init__(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                pass
+
+            def raise_for_status(self):
+                from requests.exceptions import HTTPError
+
+                # Simulate "unknown" status (response=None)
+                raise HTTPError(response=None)
+
+            def iter_content(self, chunk_size=1024):
+                yield b""
+
+        with mock.patch("requests.get", return_value=FakeResp()):
+            with mock.patch.object(dfupdate, "logger") as mlog:
+                self.updater.check_software(nvj)
+
+                # Then: version was rolled back to current (1.0)
+                self.assertEqual(self.updater.dfp.envs.get("FOO_VERSION"), "1.0")
+                # SHA not updated
+                self.assertEqual(self.updater.dfp.envs.get("FOO_SHA256"), "oldsha")
+                # Dockerfile still written once due to updated flag set prior to SHA fetch
+                matomic.assert_called_once()
+                # And we logged an HTTP error with "Unknown"
+                # Collect error log call args as strings
+                error_msgs = []
+                for call in mlog.error.mock_calls:
+                    _, args, kwargs = call
+                    if args:
+                        error_msgs.append(" ".join(str(a) for a in args))
+                self.assertTrue(
+                    any("HTTP error" in m and "Unknown" in m for m in error_msgs)
+                )
 
 
 class TestParseArgs(unittest.TestCase):

@@ -5,15 +5,20 @@ Updates a given Dockerfile based on the output of nvchecker.
 
 import argparse
 import hashlib
+import io
 import json
 import logging
 import os
 import shutil
 import sys
 import tempfile
+from collections import defaultdict
+from dataclasses import dataclass
 
 import requests
 from dockerfile_parse import DockerfileParser
+from dockerfile_parse.parser import image_from
+from dockerfile_parse.util import WordSplitter
 from tenacity import (
     retry,
     wait_exponential,
@@ -23,6 +28,44 @@ from tenacity import (
 )
 
 logger = logging.getLogger("dfupdate")
+
+
+@dataclass
+class Stage:
+    index: int
+    image: str | None
+    alias: str | None
+    tokens: list[str]
+    startline: int
+    endline: int
+    image_token_index: int | None
+    changed: bool = False
+
+
+@dataclass
+class EnvEntry:
+    key: str
+    value: str
+    raw_value: str
+    style: str
+    token_index: int
+
+
+@dataclass
+class EnvInstruction:
+    stage_index: int
+    startline: int
+    endline: int
+    tokens: list[str]
+    entries: list[EnvEntry]
+    changed: bool = False
+
+
+@dataclass
+class FileEdit:
+    startline: int
+    endline: int
+    new_lines: list[str]
 
 
 class DFUpdater:
@@ -40,30 +83,310 @@ class DFUpdater:
             nvcheck_file: absolute or relative path to nvchecker file.
             dockerfile: absolute or relative path to dockerfile.
         """
-        self.dfp = DockerfileParser(path=dockerfile)
+        self.dfp: DockerfileParser | None = None
         # Paths to dockerfile and nvchecker file
         self.nvcheck_file = nvcheck_file
         self.dockerfile = dockerfile
         # Map of software and version found in dockerfile
         self.dockerfile_versions = {}
+        self.software_versions: dict[str, set[str]] = {}
         # Global update flag
         self.updated = False
+        # Parsed dockerfile state
+        self.lines: list[str] | None = None
+        self.stages: list[Stage] = []
+        self.env_instructions: list[EnvInstruction] = []
+        self.env_entries_by_name: dict[str, list[tuple[EnvInstruction, EnvEntry]]] = {}
+
+    def _ensure_loaded(self):
+        """
+        Load Dockerfile content into memory and parse structure for
+        stages and ENV instructions.
+        """
+        if self.lines is not None:
+            return
+        self.lines = load_file_content(self.dockerfile).splitlines(keepends=True)
+        content = "".join(self.lines)
+        self.dfp = DockerfileParser(fileobj=io.StringIO(content), cache_content=True)
+        self.stages = self._parse_stages()
+        self.env_instructions = self._parse_env_instructions()
+        self.env_entries_by_name = self._index_env_entries()
+
+    def _parse_stages(self) -> list[Stage]:
+        if not self.dfp:
+            return []
+        stages: list[Stage] = []
+        stage_index = -1
+        for instruction in self.dfp.structure:
+            if instruction["instruction"] != "FROM":
+                continue
+            stage_index += 1
+            tokens = list(WordSplitter(instruction["value"]).split(dequote=False))
+            image, alias = image_from(instruction["value"])
+            image_token_index = self._find_image_token_index(tokens)
+            stages.append(
+                Stage(
+                    index=stage_index,
+                    image=image,
+                    alias=alias,
+                    tokens=tokens,
+                    startline=instruction["startline"],
+                    endline=instruction["endline"],
+                    image_token_index=image_token_index,
+                )
+            )
+        return stages
+
+    def _find_image_token_index(self, tokens: list[str]) -> int | None:
+        for idx, token in enumerate(tokens):
+            if token.startswith("--"):
+                continue
+            return idx
+        return None
+
+    def _parse_env_entries(self, tokens: list[str]) -> list[EnvEntry]:
+        entries: list[EnvEntry] = []
+        if "=" not in tokens[0]:
+            key = tokens[0]
+            raw_value = " ".join(tokens[1:]) if len(tokens) > 1 else ""
+            value = WordSplitter(raw_value).dequote() if raw_value else ""
+            entries.append(
+                EnvEntry(
+                    key=key,
+                    value=value,
+                    raw_value=raw_value,
+                    style="space",
+                    token_index=0,
+                )
+            )
+            return entries
+
+        for idx, token in enumerate(tokens):
+            if "=" not in token:
+                continue
+            key, raw_value = token.split("=", 1)
+            value = WordSplitter(raw_value).dequote()
+            entries.append(
+                EnvEntry(
+                    key=key,
+                    value=value,
+                    raw_value=raw_value,
+                    style="equals",
+                    token_index=idx,
+                )
+            )
+        return entries
+
+    def _parse_env_instructions(self) -> list[EnvInstruction]:
+        if not self.dfp:
+            return []
+        env_instructions: list[EnvInstruction] = []
+        stage_index = -1
+        for instruction in self.dfp.structure:
+            if instruction["instruction"] == "FROM":
+                stage_index += 1
+                continue
+            if instruction["instruction"] != "ENV":
+                continue
+            tokens = list(WordSplitter(instruction["value"]).split(dequote=False))
+            if not tokens:
+                continue
+            entries = self._parse_env_entries(tokens)
+            env_instructions.append(
+                EnvInstruction(
+                    stage_index=stage_index,
+                    startline=instruction["startline"],
+                    endline=instruction["endline"],
+                    tokens=tokens,
+                    entries=entries,
+                )
+            )
+        return env_instructions
+
+    def _index_env_entries(self) -> dict[str, list[tuple[EnvInstruction, EnvEntry]]]:
+        mapping: defaultdict[str, list[tuple[EnvInstruction, EnvEntry]]] = defaultdict(
+            list
+        )
+        for env_instruction in self.env_instructions:
+            for entry in env_instruction.entries:
+                mapping[entry.key].append((env_instruction, entry))
+        return dict(mapping)
+
+    def _format_env_value(self, raw_value: str, new_value: str) -> str:
+        if (
+            raw_value
+            and len(raw_value) >= 2
+            and raw_value[0] == raw_value[-1]
+            and raw_value[0] in ("'", '"')
+        ):
+            return f"{raw_value[0]}{new_value}{raw_value[0]}"
+        if any(ch.isspace() for ch in new_value):
+            return f'"{new_value}"'
+        return new_value
+
+    def _update_env_entry(
+        self, env_instruction: EnvInstruction, entry: EnvEntry, new_value: str
+    ) -> bool:
+        formatted_value = self._format_env_value(entry.raw_value, new_value)
+        if entry.style == "equals":
+            new_token = f"{entry.key}={formatted_value}"
+            if env_instruction.tokens[entry.token_index] == new_token:
+                return False
+            env_instruction.tokens[entry.token_index] = new_token
+        else:
+            new_token = formatted_value
+            if (
+                len(env_instruction.tokens) < 2
+                or env_instruction.tokens[1] != new_token
+                or env_instruction.tokens[0] != entry.key
+            ):
+                env_instruction.tokens = [entry.key, new_token]
+            else:
+                return False
+        entry.value = new_value
+        entry.raw_value = formatted_value
+        env_instruction.changed = True
+        self.updated = True
+        return True
+
+    def _update_env_value(self, env_name: str, new_value: str) -> bool:
+        changed = False
+        for env_instruction, entry in self.env_entries_by_name.get(env_name, []):
+            changed = (
+                self._update_env_entry(env_instruction, entry, new_value) or changed
+            )
+        return changed
+
+    def _get_env_value(
+        self, env_name: str, stage_index: int | None = None
+    ) -> str | None:
+        entries = self.env_entries_by_name.get(env_name, [])
+        if stage_index is not None:
+            for env_instruction, entry in entries:
+                if env_instruction.stage_index == stage_index and entry.value:
+                    return entry.value
+        for _, entry in entries:
+            if entry.value:
+                return entry.value
+        return None
+
+    def _generate_edits(self) -> list[FileEdit]:
+        edits: list[FileEdit] = []
+        for stage in self.stages:
+            if stage.changed and stage.image_token_index is not None:
+                new_content = f"FROM {' '.join(stage.tokens)}\n"
+                edits.append(FileEdit(stage.startline, stage.endline, [new_content]))
+        for env_instruction in self.env_instructions:
+            if env_instruction.changed:
+                new_content = f"ENV {' '.join(env_instruction.tokens)}\n"
+                edits.append(
+                    FileEdit(
+                        env_instruction.startline,
+                        env_instruction.endline,
+                        new_content.splitlines(keepends=True),
+                    )
+                )
+        return sorted(edits, key=lambda edit: edit.startline)
+
+    def _apply_edits(self, edits: list[FileEdit]):
+        if self.lines is None:
+            return
+        updated_lines = self.lines[:]
+        offset = 0
+        for edit in edits:
+            start = edit.startline + offset
+            end = edit.endline + offset
+            updated_lines[start : end + 1] = edit.new_lines
+            offset += len(edit.new_lines) - (end - start + 1)
+        self.lines = updated_lines
+
+    def _write_changes(self):
+        edits = self._generate_edits()
+        if not edits or self.lines is None:
+            return
+        self._apply_edits(edits)
+        new_content = "".join(self.lines)
+        atomic_write_file(self.dockerfile, new_content)
+        self.dfp = DockerfileParser(
+            fileobj=io.StringIO(new_content), cache_content=True
+        )
+        logger.info("%s has been updated!", self.dockerfile)
+
+    def _split_image(self, image: str | None) -> tuple[str | None, str, str | None]:
+        if not image:
+            return None, "", None
+        if "@" in image:
+            repo, digest = image.split("@", 1)
+            return repo, "@", digest
+        last_slash = image.rfind("/")
+        last_colon = image.rfind(":")
+        if last_colon > last_slash:
+            return image[:last_colon], ":", image[last_colon + 1 :]
+        return image, ":", None
+
+    def _repo_key(self, repo: str | None) -> str | None:
+        if not repo:
+            return None
+        name = repo.split("/")[-1]
+        name = name.split(":")[0]
+        key = name.replace("-", "_").upper()
+        return key or None
+
+    def _base_version_for_stage(self, stage: Stage, nvcheck_json: dict) -> str | None:
+        repo, _, _ = self._split_image(stage.image)
+        candidates = []
+        if self.stages and stage.index == len(self.stages) - 1:
+            candidates.append("BASE")
+        if stage.alias:
+            alias = stage.alias.upper()
+            candidates.extend([f"BASE_{alias}", f"{alias}_BASE"])
+        candidates.append(f"BASE_STAGE_{stage.index}")
+        candidates.append(f"BASE{stage.index}")
+        repo_key = self._repo_key(repo)
+        if repo_key:
+            candidates.append(f"{repo_key}_BASE")
+        seen: set[str] = set()
+        for key in candidates:
+            if key in seen:
+                continue
+            seen.add(key)
+            version = get_nested(nvcheck_json, [key, "version"])
+            if not version:
+                version = nvcheck_json.get(key)
+            if version:
+                return str(version)
+        return None
+
+    def _stage_label(self, stage: Stage) -> str:
+        return stage.alias or f"stage {stage.index}"
 
     def get_dockerfile_versions(self):
         """
         Create list of software and versions found in dockerfile.
         """
-        software_packages = {
-            key.rsplit("_", 1)[0]: value
-            for key, value in self.dfp.envs.items()
-            if key.endswith("_VERSION") and value
-        }
-        for sw, ver in software_packages.items():
-            upgrade_flag = self.dfp.envs.get(f"{sw}_UPGRADE", "true").lower()
-            if upgrade_flag == "false":
+        self._ensure_loaded()
+        self.dockerfile_versions = {}
+        self.software_versions = {}
+        upgrade_flags: dict[str, str] = {}
+        for env_name, entries in self.env_entries_by_name.items():
+            if not env_name.endswith("_UPGRADE"):
+                continue
+            sw = env_name.rsplit("_", 1)[0]
+            value = entries[-1][1].value.lower() if entries else ""
+            upgrade_flags[sw] = value
+
+        for env_name, entries in self.env_entries_by_name.items():
+            if not env_name.endswith("_VERSION"):
+                continue
+            sw = env_name.rsplit("_", 1)[0]
+            if upgrade_flags.get(sw) == "false":
                 logger.info("%s upgrade set to false, skipping.", sw)
                 continue
-            self.dockerfile_versions[sw] = ver
+            values = {entry.value for _, entry in entries if entry.value}
+            if not values:
+                continue
+            self.software_versions[sw] = values
+            self.dockerfile_versions[sw] = next(iter(values))
 
     def get_nvcheck_json(self) -> dict:
         nvcheck_content = load_file_content(self.nvcheck_file)
@@ -81,14 +404,37 @@ class DFUpdater:
         Args:
             nvcheck_json: dictionary containing parsed nvchecker file JSON.
         """
-        base_image, base_tag = self.dfp.baseimage.rsplit(":", 1)
-        base_version = get_nested(nvcheck_json, ["BASE", "version"])
-        if base_version != base_tag:
-            logger.info("Base image out of date: %s -> %s", base_tag, base_version)
-            self.dfp.baseimage = f"{base_image}:{base_version}"
-            logger.info("Base image updated.")
-        else:
-            logger.info("Base image is up to date: %s", base_tag)
+        self._ensure_loaded()
+        for stage in self.stages:
+            repo, separator, current_tag = self._split_image(stage.image)
+            desired_version = self._base_version_for_stage(stage, nvcheck_json)
+            if not desired_version:
+                continue
+            if stage.image_token_index is None or not repo:
+                logger.warning(
+                    "Unable to update base image for %s", self._stage_label(stage)
+                )
+                continue
+            if current_tag == desired_version:
+                logger.info(
+                    "Base image is up to date for %s: %s",
+                    self._stage_label(stage),
+                    current_tag or "",
+                )
+                continue
+            logger.info(
+                "Base image out of date for %s: %s -> %s",
+                self._stage_label(stage),
+                current_tag,
+                desired_version,
+            )
+            separator_to_use = separator or ":"
+            stage.tokens[stage.image_token_index] = (
+                f"{repo}{separator_to_use}{desired_version}"
+            )
+            stage.changed = True
+            self.updated = True
+            logger.info("Base image updated for %s.", self._stage_label(stage))
 
     def check_software(self, nvcheck_json: dict):
         """
@@ -97,54 +443,61 @@ class DFUpdater:
         Args:
             nvcheck_json: dictionary containing parsed nvchecker file JSON.
         """
+        self._ensure_loaded()
         for sw, ver in self.dockerfile_versions.items():
-            # Attempt newer nvchecker format first
             new_ver = get_nested(nvcheck_json, [sw, "version"])
-            # Fall back to old format
             if not new_ver:
                 new_ver = nvcheck_json.get(sw)
                 if not new_ver:
                     logger.warning("Failed to find %s in %s", sw, self.nvcheck_file)
                     continue
-            if new_ver == ver:
+            new_ver_str = str(new_ver)
+            current_values = self.software_versions.get(sw, {ver})
+            if current_values == {new_ver_str}:
                 logger.info("%s is up to date", sw)
             else:
-                self.updated = True
-                self.update_software(sw, str(new_ver), ver)
+                self.update_software(sw, new_ver_str, current_values)
         if self.updated:
-            atomic_write_file(self.dockerfile, self.dfp.content)
-            logger.info("%s has been updated!", self.dockerfile)
+            self._write_changes()
 
-    def update_software(self, sw: str, new_ver: str, current_ver: str):
+    def update_software(self, sw: str, new_ver: str, current_versions: set[str]):
         """
         Update the specified software.
 
         Args:
             sw: the software name to update (as found in the dockerfile).
             new_ver: the new version to update to.
-            current_ver: the current software version.
+            current_versions: set of currently detected versions.
         """
-        logger.info("Updating %s: %s -> %s", sw, current_ver, new_ver)
+        current_example = next(iter(current_versions), "")
+        logger.info("Updating %s: %s -> %s", sw, current_example, new_ver)
 
         # Update bare ENV versions
-        self.dfp.envs[f"{sw}_VERSION"] = new_ver  # type: ignore[attr-defined]
+        version_env = f"{sw}_VERSION"
+        self._update_env_value(version_env, new_ver)
+
+        # Use the first stage where the version appears to look up related envs
+        stage_hint = None
+        if self.env_entries_by_name.get(version_env):
+            stage_hint = self.env_entries_by_name[version_env][0][0].stage_index
 
         # Check for remote URL and get new shasum
-        df_url = self.dfp.envs.get(f"{sw}_URL")
-        df_filename = self.dfp.envs.get(f"{sw}_FILENAME")
-        df_sha = self.dfp.envs.get(f"{sw}_SHA256")
+        df_url = self._get_env_value(f"{sw}_URL", stage_hint)
+        df_filename = self._get_env_value(f"{sw}_FILENAME", stage_hint)
+        df_sha = self._get_env_value(f"{sw}_SHA256", stage_hint)
         if df_url and df_filename and df_sha:
             logger.info("Found remote URL, fetching and calculating new shasum")
             full_url = df_url + "/" + df_filename
-            full_url = full_url.replace(current_ver, new_ver)
+            full_url = full_url.replace(current_example, new_ver)
             logger.info("Retrieving new SHA256 for %s from %s", sw, full_url)
             new_sha = get_remote_sha(full_url)
             if new_sha:
-                self.dfp.envs[f"{sw}_SHA256"] = new_sha  # type: ignore[attr-defined]
+                self._update_env_value(f"{sw}_SHA256", new_sha)
             else:
                 logger.error("Got empty shasum! Skipping %s", sw)
                 # Reset ENV values to avoid updating
-                self.dfp.envs[f"{sw}_VERSION"] = current_ver  # type: ignore[attr-defined]
+                if current_example:
+                    self._update_env_value(version_env, current_example)
         else:
             logger.info(
                 "Attribute not found: URL:%s filename:%s sha:%s",
@@ -162,6 +515,13 @@ class DFUpdater:
         Check each software package and updated if needed.
         """
         nvcheck_json = self.get_nvcheck_json()
+        self.lines = None
+        self.stages = []
+        self.env_instructions = []
+        self.env_entries_by_name = {}
+        self.dfp = None
+        self.updated = False
+        self._ensure_loaded()
         self.get_dockerfile_versions()
         self.update_base(nvcheck_json)
         self.check_software(nvcheck_json)

@@ -30,6 +30,26 @@ include_regex = "\\d+\\.\\d+\\.?\\d?-alpine\\d\\.\\d+"
 
 Note that the entry must be called 'BASE' for dfupate to recognise it. The script will update the Dockerfile directly with any newer base image found.
 
+For multi-stage Dockerfiles, dfupdate will attempt to update every `FROM` line. By default it treats the final stage as `BASE`. Earlier stages are matched using the stage name, stage index, or both:
+
+- If the stage is named (e.g. `FROM node:22-alpine AS builder`), use `BASE_<NAME>` or `<NAME>_BASE`, for example `BASE_BUILDER`.
+- All stages can also be addressed by index with `BASE_STAGE_<index>` or `BASE<index>`, where the first `FROM` is index `0`.
+- If none of the above are present, the final stage falls back to `BASE`.
+
+Example `nvchecker.toml` for a two-stage build:
+
+```
+[BASE_BUILDER]
+source = "container"
+container = "library/node"
+include_regex = "\\d+\\.\\d+-alpine\\d+\\.\\d+"
+
+[BASE]
+source = "container"
+container = "library/python"
+include_regex = "\\d+\\.\\d+\\.?\\d?-alpine\\d\\.\\d+"
+```
+
 ### Required ENV Variables
 
 You can update included software in your Dockerfile using nvchecker and dfupdate.

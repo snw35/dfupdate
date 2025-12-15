@@ -7,7 +7,7 @@
             "request": "launch",
             "program": "dfupdate.py",
             "console": "integratedTerminal",
-            "args": "-d ../reforge/neo/Dockerfile -n ../reforge/neo/new_ver.json"
+            "args": "-d ./Dockerfile -n ./new_ver.json"
         }
     ]
 }

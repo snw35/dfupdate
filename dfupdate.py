@@ -262,6 +262,30 @@ class DFUpdater:
             )
         return changed
 
+    def _substitute_version_tokens(
+        self, text: str | None, sw: str, new_ver: str, current_example: str
+    ) -> str:
+        """
+        Replace common version placeholders with the new version.
+        Supports ${SW_VERSION}, $SW_VERSION, and the literal current version string.
+        """
+        if not text:
+            return ""
+        sw_upper = sw.upper()
+        sw_lower = sw.lower()
+        placeholders = [
+            f"${{{sw_upper}_VERSION}}",
+            f"${sw_upper}_VERSION",
+            f"${{{sw_lower}_VERSION}}",
+            f"${sw_lower}_VERSION",
+        ]
+        result = text
+        for placeholder in placeholders:
+            result = result.replace(placeholder, new_ver)
+        if current_example:
+            result = result.replace(current_example, new_ver)
+        return result
+
     def _get_env_value(
         self, env_name: str, stage_index: int | None = None
     ) -> str | None:
@@ -492,8 +516,13 @@ class DFUpdater:
         df_sha = self._get_env_value(f"{sw}_SHA256", stage_hint)
         if df_url and df_filename and df_sha:
             logger.info("Found remote URL, fetching and calculating new shasum")
-            full_url = df_url + "/" + df_filename
-            full_url = full_url.replace(current_example, new_ver)
+            url_template = self._substitute_version_tokens(
+                df_url, sw, new_ver, current_example
+            )
+            filename_template = self._substitute_version_tokens(
+                df_filename, sw, new_ver, current_example
+            )
+            full_url = url_template.rstrip("/") + "/" + filename_template.lstrip("/")
             logger.info("Retrieving new SHA256 for %s from %s", sw, full_url)
             new_sha = get_remote_sha(full_url)
             if new_sha:

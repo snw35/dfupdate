@@ -14,6 +14,7 @@ import sys
 import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Sequence, cast
 
 import requests
 from dockerfile_parse import DockerfileParser
@@ -121,7 +122,9 @@ class DFUpdater:
             if instruction["instruction"] != "FROM":
                 continue
             stage_index += 1
-            tokens = list(WordSplitter(instruction["value"]).split(dequote=False))
+            tokens = cast(
+                list[str], list(WordSplitter(instruction["value"]).split(dequote=False))
+            )
             image, alias = image_from(instruction["value"])
             image_token_index = self._find_image_token_index(tokens)
             stages.append(
@@ -137,7 +140,7 @@ class DFUpdater:
             )
         return stages
 
-    def _find_image_token_index(self, tokens: list[str]) -> int | None:
+    def _find_image_token_index(self, tokens: Sequence[str]) -> int | None:
         for idx, token in enumerate(tokens):
             if token.startswith("--"):
                 continue
@@ -188,7 +191,9 @@ class DFUpdater:
                 continue
             if instruction["instruction"] != "ENV":
                 continue
-            tokens = list(WordSplitter(instruction["value"]).split(dequote=False))
+            tokens = cast(
+                list[str], list(WordSplitter(instruction["value"]).split(dequote=False))
+            )
             if not tokens:
                 continue
             entries = self._parse_env_entries(tokens)

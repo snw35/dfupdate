@@ -21,7 +21,7 @@ jobs:
     strategy:
       matrix:
         workdir: [.]
-    uses: snw35/cicd/.github/workflows/github.yaml@multistage
+    uses: snw35/cicd/.github/workflows/github.yaml@main
     with:
       WORKDIR: ${{ matrix.workdir }}
       IMAGE_TAG: DFUPDATE_VERSION

@@ -130,7 +130,7 @@ class TestDFUpdater(unittest.TestCase):
         self.assertIn("FROM python:3.11 AS builder", content)
         self.assertIn("FROM alpine:3.19", content)
 
-    @mock.patch("dfupdate.get_remote_sha", return_value="deadbeef")
+    @mock.patch("dfupdate.get_remote_sha", return_value="jytncge6")
     def test_check_software_updates_across_stages(self, _msha):
         self._write_dockerfile(
             "FROM python:3.10 AS builder\n"
@@ -148,8 +148,38 @@ class TestDFUpdater(unittest.TestCase):
         with open(self.dockerfile_path, "r", encoding="utf8") as fh:
             content = fh.read()
         self.assertEqual(content.count("FOO_VERSION=2.0"), 2)
-        self.assertIn("FOO_SHA256=deadbeef", content)
-        self.assertIn("FOO_SHA256 deadbeef", content)
+        self.assertIn("FOO_SHA256=jytncge6", content)
+        self.assertIn("FOO_SHA256 jytncge6", content)
+
+    @mock.patch("dfupdate.get_remote_sha", return_value="jytncge6")
+    def test_update_replaces_version_placeholders_in_url_and_filename(self, msha):
+        self._write_dockerfile(
+            "FROM alpine\n"
+            "ENV UV_VERSION=0.9.15\n"
+            "ENV UV_URL=https://github.com/astral-sh/uv/releases/download/${UV_VERSION}\n"
+            "ENV UV_FILENAME=uv-$UV_VERSION.tar.gz\n"
+            "ENV UV_SHA256=old\n"
+        )
+        with open(self.nvchecker_path, "w", encoding="utf8") as fh:
+            json.dump({"UV": {"version": "0.9.17"}}, fh)
+        self.updater.update()
+        used_url = msha.call_args.args[0]
+        self.assertNotIn("${UV_VERSION}", used_url)
+        self.assertNotIn("$UV_VERSION", used_url)
+        self.assertIn("0.9.17", used_url)
+        with open(self.dockerfile_path, "r", encoding="utf8") as fh:
+            content = fh.read()
+        self.assertIn("UV_VERSION=0.9.17", content)
+        self.assertIn("UV_SHA256=jytncge6", content)
+
+    def test_update_detects_newer_version_and_writes(self):
+        self._write_dockerfile("FROM alpine\nENV UV_VERSION=0.9.15\n")
+        with open(self.nvchecker_path, "w", encoding="utf8") as fh:
+            json.dump({"UV": {"version": "0.9.17"}}, fh)
+        self.updater.update()
+        with open(self.dockerfile_path, "r", encoding="utf8") as fh:
+            content = fh.read()
+        self.assertIn("UV_VERSION=0.9.17", content)
 
 
 class TestParseArgs(unittest.TestCase):

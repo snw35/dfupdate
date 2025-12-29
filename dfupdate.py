@@ -663,8 +663,9 @@ def get_remote_sha(url: str, timeout: int = 10) -> str | None:
             return sha256.hexdigest()
     except requests.exceptions.HTTPError as e:
         logger.error(
-            "HTTP error %s for URL: %s",
-            e.response.status_code if e.response else "Unknown",
+            "HTTP error %d %s for URL: %s",
+            e.response.status_code,
+            str(e.response.reason),
             url,
         )
         return None

@@ -50,3 +50,6 @@
 - The repository’s primary purpose is in-place Dockerfile updates driven by nvchecker output and ENV-variable conventions from `README.md`.
 - Be careful to preserve existing non-ENV Dockerfile content and comments; updates should be limited to `FROM` and `ENV` lines.
 - Any changes to env parsing or base image matching should be reflected in both `README.md` and `test_dfupdate.py`.
+- Update or add tests for any change in functionality.
+- Prefer minimal new lines of code when adding features.
+- Preserve existing behaviors that touch external files to maintain backwards compatibility between releases.

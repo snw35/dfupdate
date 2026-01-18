@@ -9,6 +9,8 @@ This Python script updates both the base image and included software in a Docker
 
 This image, working with [snw35/nvchecker](https://github.com/snw35/nvchecker), automatically updates itself.
 
+For AI agents working on this repository, see `AGENTS.md`.
+
 ## Requirements
 
 This script reads the output of [nvchecker](https://github.com/lilydjwg/nvchecker). It supports both old (1.x) and new (2.x) output formats, and can also search into arbitary JSON for software package names and versions.

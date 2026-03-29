@@ -9,8 +9,8 @@
       "url": "https://pypi.org/project/dockerfile_parse/2.0.1/"
     },
     "REQUESTS": {
-      "version": "2.32.5",
-      "url": "https://pypi.org/project/requests/2.32.5/"
+      "version": "2.33.0",
+      "url": "https://pypi.org/project/requests/2.33.0/"
     },
     "TENACITY": {
       "version": "9.1.4",

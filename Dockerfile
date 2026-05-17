@@ -1,11 +1,11 @@
-FROM python:3.14.4-alpine3.23
+FROM python:3.14.5-alpine3.23
 
 COPY dfupdate.py /dfupdate.py
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 
 ENV DFUPDATE_VERSION 2.2.2
-ENV REQUESTS_VERSION 2.33.1
+ENV REQUESTS_VERSION 2.34.2
 ENV TENACITY_VERSION 9.1.4
 ENV DOCKERFILE_PARSE_VERSION 2.0.1
 

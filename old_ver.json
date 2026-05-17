@@ -2,15 +2,15 @@
   "version": 2,
   "data": {
     "BASE": {
-      "version": "3.14.4-alpine3.23"
+      "version": "3.14.5-alpine3.23"
     },
     "DOCKERFILE_PARSE": {
       "version": "2.0.1",
       "url": "https://pypi.org/project/dockerfile_parse/2.0.1/"
     },
     "REQUESTS": {
-      "version": "2.33.1",
-      "url": "https://pypi.org/project/requests/2.33.1/"
+      "version": "2.34.2",
+      "url": "https://pypi.org/project/requests/2.34.2/"
     },
     "TENACITY": {
       "version": "9.1.4",

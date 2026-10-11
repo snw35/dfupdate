@@ -6,7 +6,7 @@ COPY docker-entrypoint.sh /docker-entrypoint.sh
 
 ENV DFUPDATE_VERSION 2.2.2
 ENV REQUESTS_VERSION 2.34.2
-ENV TENACITY_VERSION 9.1.4
+ENV TENACITY_VERSION 9.2.1
 ENV DOCKERFILE_PARSE_VERSION 2.0.1
 
 RUN apk --upgrade --no-cache add \
